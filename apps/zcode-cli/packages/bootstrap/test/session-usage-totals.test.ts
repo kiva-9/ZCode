@@ -5,12 +5,13 @@
 // 本折叠把持久 assistant 消息的 tokens 与 wall 计时汇总成恢复种子。
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { MessageInfo } from "@zcode/contracts";
 import { sumPersistedUsageTotals } from "../src/zcode-protocol/session-usage-totals.ts";
 
 interface Msg {
   info: {
     role: string;
-    summary?: boolean;
+    summary?: MessageInfo["summary"];
     tokens?: {
       total?: number;
       input: number;
@@ -113,6 +114,31 @@ test("compact summary 消息不参与汇总（重写历史边界，不是 provid
     ttftMs: 0,
     ttftSteps: 0,
     decodeMs: 0,
+    requests: 1,
+  });
+});
+
+test("用户消息的摘要对象符合输入契约且不参与用量汇总", () => {
+  const messages: Msg[] = [
+    {
+      info: {
+        role: "user",
+        summary: { title: "测试摘要", diffs: [] },
+        tokens: { input: 9_999, output: 9_999, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 1_000, completed: 9_000, firstTokenAt: 2_000 },
+      },
+    },
+    timedAssistant(100, 50, { created: 2_000, firstTokenAt: 2_100, completed: 2_500 }),
+  ];
+  assert.deepEqual(sumPersistedUsageTotals(messages), {
+    inputTokens: 100,
+    outputTokens: 50,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    llmMs: 500,
+    ttftMs: 100,
+    ttftSteps: 1,
+    decodeMs: 400,
     requests: 1,
   });
 });

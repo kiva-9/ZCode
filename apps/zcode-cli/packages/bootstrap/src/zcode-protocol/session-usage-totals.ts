@@ -8,13 +8,15 @@
 // info.time 记录 { created, firstTokenAt?, completed? }。本模块把全量非 summary
 // assistant 消息汇总成四个计费桶与三组 wall 计时，经 getSessionUsageSeed 播种给
 // ProductProjection（与 contextWindow 种子同一条恢复路径、同一守卫）。
-import type { TokenUsageInfo } from "@zcode/contracts";
+import type { MessageInfo, TokenUsageInfo } from "@zcode/contracts";
 
 /** 汇总入口需要的最小消息形状（结构类型，MessageWithParts 天然满足）。 */
 export interface UsageTotalsMessageLike {
   info: {
     role: string;
-    summary?: boolean;
+    // 用户消息的 summary 是对象，assistant 的才是 boolean；复用联合契约，
+    // 否则完整 transcript 传入时 bootstrap 编译失败。折叠仍先按 role 排除用户消息。
+    summary?: MessageInfo["summary"];
     /** 仅 assistant 消息持久化 tokens/time；其他角色缺省（折叠时跳过）。 */
     tokens?: TokenUsageInfo;
     time?: {
