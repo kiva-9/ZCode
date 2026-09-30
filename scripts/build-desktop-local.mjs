@@ -19,8 +19,11 @@
  * 与生产安装包同名同 id。要并排安装的 Preview 包显式传 `ZCODE_PREVIEW_IDENTITY=1`。
  *
  * 用法：
- *   node scripts/build-desktop-local.mjs            # mac arm64 安装包 + 解包 app
- *   node scripts/build-desktop-local.mjs --zip-only # 只要 zip，不出 dmg（快很多）
+ *   node scripts/build-desktop-local.mjs                 # mac arm64：安装包 + 解包 app
+ *   node scripts/build-desktop-local.mjs --skip-prepare  # agent bundle 已 stage 过时跳过准备（快很多）
+ *   node scripts/build-desktop-local.mjs --os win        # 其它平台（透传给 bundle.mjs）
+ *
+ * 其它透传参数见 `node packages/desktop/scripts/bundle.mjs --help`。
  */
 
 import { spawn } from "node:child_process";
@@ -31,8 +34,11 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../..");
 const desktopRoot = resolve(repoRoot, "packages/desktop");
 const distDirName = "dist-local";
+// 只透传 bundle.mjs 真实支持的参数；不自己发明开关（曾发明过 --zip-only，
+// 被 bundle.mjs 的严格参数校验直接拒掉）。
+const PASSTHROUGH_ARGS = new Set(["--dry-run", "--skip-prepare", "--skip-build"]);
 const args = process.argv.slice(2);
-const zipOnly = args.includes("--zip-only");
+const passthrough = args.filter((arg) => PASSTHROUGH_ARGS.has(arg));
 
 function run(command, commandArgs, env) {
   return new Promise((resolveRun, rejectRun) => {
@@ -64,13 +70,13 @@ const env = {
   ZCODE_DESKTOP_DIST_DIR: distDirName,
 };
 
-const bundleArgs = ["--filter", "@zcode/desktop", "run", "bundle", "--"];
-if (zipOnly) bundleArgs.push("--zip", "--dir");
+const bundleArgs = ["--filter", "@zcode/desktop", "run", "bundle", "--", ...passthrough];
 
 console.log(
   `[build:desktop:local] 输出目录 packages/desktop/${distDirName}/（已被 .gitignore 覆盖）`,
 );
 console.log("[build:desktop:local] 身份：production（ZCode / dev.zcode.app）");
+if (passthrough.length > 0) console.log(`[build:desktop:local] 透传参数：${passthrough.join(" ")}`);
 
 await run(pnpmCommand, bundleArgs, env);
 
@@ -81,6 +87,6 @@ const zipPath = resolve(distRoot, "ZCode-3.14.3-mac-arm64.zip");
 
 console.log("\n[build:desktop:local] 完成，产物：");
 if (existsSync(appPath)) console.log(`  解包 app  ${appPath}`);
-if (!zipOnly && existsSync(dmgPath)) console.log(`  安装包    ${dmgPath}`);
+if (existsSync(dmgPath)) console.log(`  安装包    ${dmgPath}`);
 if (existsSync(zipPath)) console.log(`  zip       ${zipPath}`);
 console.log("\n提示：这些路径不会被其他会话的构建清掉；下次构建会整体刷新同一目录。");
