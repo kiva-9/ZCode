@@ -81,6 +81,17 @@ export function createInitialConversationSnapshot(
         cacheWriteTokens: 0,
       },
     },
+    // 会话计量计数（StatsPills 数据源；累加点见 product-projection）。
+    stats: {
+      turns: 0,
+      steps: 0,
+      llmMs: 0,
+      toolMs: 0,
+      ttftMs: 0,
+      ttftSteps: 0,
+      decodeMs: 0,
+      decodeTokens: 0,
+    },
     queue: { items: [], autoDrain: true },
     pendingInteractions: [],
     pendingCommands: [],

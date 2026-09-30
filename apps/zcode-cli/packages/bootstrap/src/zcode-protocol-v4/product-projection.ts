@@ -18,6 +18,7 @@ import type {
   HookRunLifecyclePayload,
   ModelCompletePayload,
   ModelNetworkStatusPayload,
+  ModelRequestPayload,
   ModelSelectedPayload,
   ModelStreamingPayload,
   ModelUsage,
@@ -477,6 +478,14 @@ export class ProductProjection {
     touchedByEvent: false,
     usedTokens: 0,
   };
+  // 会话计量折叠（移植 DSH sessionStats）：进行中主轮模型步的起止/首 token 计时，
+  // 由 model_request / model_streaming / model_complete 三个事件推进；
+  // 工具用时按 toolCallId 配对ToolCallStarted → ToolCallResult/Error。
+  // 累加值只进 snapshot.stats（hydrate 重放同一事件流重建同一状态），
+  // 这两个瞬态字段是折叠游标，不构成第二份事实源。
+  private stepStartedAtMs: number | null = null;
+  private stepFirstTokenAtMs: number | null = null;
+  private toolStartedAtByCallId = new Map<string, number>();
   // modelChange marker 在「下一个 turn 开始时」生成。
   // silentInitial 保持普通 Main 首轮静默；sourceLess 表示显式 ∅→X；known 保存上一轮
   // 实际使用的 provider/model。thought 只随基线记录，不触发模型身份变化。
@@ -1123,6 +1132,10 @@ export class ProductProjection {
     clone.currentTurnId = this.currentTurnId;
     clone.currentTurnStartedModelOnly = this.currentTurnStartedModelOnly;
     clone.contextWindowState = { ...this.contextWindowState };
+    // 计量折叠游标必须随原子路径克隆/回填，否则实时发布的 clone 分支会丢计时。
+    clone.stepStartedAtMs = this.stepStartedAtMs;
+    clone.stepFirstTokenAtMs = this.stepFirstTokenAtMs;
+    clone.toolStartedAtByCallId = new Map(this.toolStartedAtByCallId);
     clone.lastTurnModel = { ...this.lastTurnModel };
     clone.configModelTouchedByEvent = this.configModelTouchedByEvent;
     clone.configThoughtLevelsTouchedByEvent = this.configThoughtLevelsTouchedByEvent;
@@ -1166,6 +1179,9 @@ export class ProductProjection {
     this.currentTurnId = candidate.currentTurnId;
     this.currentTurnStartedModelOnly = candidate.currentTurnStartedModelOnly;
     this.contextWindowState = candidate.contextWindowState;
+    this.stepStartedAtMs = candidate.stepStartedAtMs;
+    this.stepFirstTokenAtMs = candidate.stepFirstTokenAtMs;
+    this.toolStartedAtByCallId = candidate.toolStartedAtByCallId;
     this.lastTurnModel = candidate.lastTurnModel;
     this.configModelTouchedByEvent = candidate.configModelTouchedByEvent;
     this.configThoughtLevelsTouchedByEvent = candidate.configThoughtLevelsTouchedByEvent;
@@ -1337,6 +1353,8 @@ export class ProductProjection {
         ];
       case SessionEventType.ModelStreaming: {
         if (fact.semanticKind !== "assistantSegment") return [];
+        // 计量折叠：主轮模型步的首个 assistant 增量 = 首 token 时刻（DSH firstTokenTime）。
+        this.recordStepFirstToken(event);
         const shouldClearApiRetry =
           this.acceptsActiveModelEvent(event) &&
           isZCodeModelRetryRecoveryProgressPayload(
@@ -1359,6 +1377,8 @@ export class ProductProjection {
         return this.onModelSelected(event);
       case SessionEventType.ModelComplete:
         return this.onModelComplete(event);
+      case SessionEventType.ModelRequest:
+        return this.onModelRequest(event);
       case SessionEventType.ToolCallScheduled:
         return this.onToolCallScheduled(event);
       case SessionEventType.ToolCallStarted:
@@ -2022,6 +2042,16 @@ export class ProductProjection {
     };
     this.turnHeaderRowIdByTurnId.set(turnId, header.rowId);
     deltas.push({ op: "row.appended", row: header });
+    // 计量计数：只有用户真实发起的 product turn 计入轮次；compact / goal continuation /
+    // workflowLaunch（controlOnly）等维护轮与 DSH「携带已闭合 step 的 turn」口径对齐，不计。
+    // 累加点 = turnHeader 首次创建（hydration 重放同样只走一次），与 usage/steps 同投影维护。
+    if (header.origin === "userInput" && header.executionKind !== "controlOnly") {
+      const stats = this.snapshot.stats;
+      deltas.push({
+        op: "state.updated",
+        patch: { stats: { ...stats, turns: stats.turns + 1 } },
+      });
+    }
 
     // model-only 输入（goal continuation 等）不产生可见 userInput row。
     if (fact.visibility === "visible") {
@@ -2942,7 +2972,34 @@ export class ProductProjection {
     const payload = event.payload as ToolCallStartedPayload;
     const row = this.findToolRow(String(payload.toolCallId));
     if (!row) return [];
+    // 计量折叠：工具起点（DSH tool/call）。Progress 重复到达不覆盖起点。
+    if (!this.toolStartedAtByCallId.has(String(payload.toolCallId))) {
+      this.toolStartedAtByCallId.set(String(payload.toolCallId), this.ms(event));
+    }
     return projectToolActivity(event, row);
+  }
+
+  /**
+   * 计量折叠：工具终态结算 toolMs。
+   * ToolCallResult 带权威 duration（ms）直接累加；ToolCallError 不带 duration，
+   * 用 ToolCallStarted 配对计算；两者都清理配对游标。
+   */
+  private consumeToolMs(event: SessionEvent, durationMs: number | null): ConversationDelta[] {
+    const toolCallId = String((event.payload as { toolCallId?: unknown }).toolCallId ?? "");
+    const startedAtMs = this.toolStartedAtByCallId.get(toolCallId);
+    this.toolStartedAtByCallId.delete(toolCallId);
+    let resolvedMs = durationMs;
+    if (resolvedMs === null && startedAtMs !== undefined) {
+      resolvedMs = this.ms(event) - startedAtMs;
+    }
+    if (resolvedMs === null || !Number.isFinite(resolvedMs) || resolvedMs <= 0) return [];
+    const stats = this.snapshot.stats;
+    return [
+      {
+        op: "state.updated",
+        patch: { stats: { ...stats, toolMs: stats.toolMs + Math.max(0, resolvedMs) } },
+      },
+    ];
   }
 
   private onToolCallResult(event: SessionEvent): ConversationDelta[] {
@@ -2981,7 +3038,12 @@ export class ProductProjection {
           }),
         )
       : [];
-    return [{ op: "row.upserted", row: next }, ...planDeltas];
+    return [
+      { op: "row.upserted", row: next },
+      ...planDeltas,
+      // 计量折叠：工具用时（权威 duration，ms）。
+      ...this.consumeToolMs(event, payload.duration),
+    ];
   }
 
   /**
@@ -3050,6 +3112,8 @@ export class ProductProjection {
           endedAt: this.ms(event),
         },
       },
+      // 计量折叠：错误终态不带 duration，用 ToolCallStarted 配对补计时。
+      ...this.consumeToolMs(event, null),
     ];
   }
 
@@ -4473,6 +4537,29 @@ export class ProductProjection {
     ];
   }
 
+  /**
+   * 计量折叠：主轮模型步起点（DSH stepStartTime）。
+   * sidecar 请求（标题生成 / 压缩摘要 / 子代理）的 querySource 非 main_turn，不计入，
+   * 与 onModelComplete 的 isMainTurn 门禁对称（无 querySource 的旧事件视为主轮）。
+   */
+  private onModelRequest(event: SessionEvent): ConversationDelta[] {
+    const payload = event.payload as ModelRequestPayload;
+    if (!(payload.querySource === undefined || payload.querySource === "main_turn")) {
+      return [];
+    }
+    this.stepStartedAtMs = this.ms(event);
+    this.stepFirstTokenAtMs = null;
+    return [];
+  }
+
+  /** 计量折叠：记录主轮模型步的首个 assistant 增量时刻；已有值不覆盖。 */
+  private recordStepFirstToken(event: SessionEvent): void {
+    if (this.stepStartedAtMs === null || this.stepFirstTokenAtMs !== null) return;
+    const payload = event.payload as ModelStreamingPayload;
+    if (typeof payload.delta === "string" && payload.delta.length === 0) return;
+    this.stepFirstTokenAtMs = this.ms(event);
+  }
+
   private onModelComplete(event: SessionEvent): ConversationDelta[] {
     const payload = event.payload as ModelCompletePayload;
     const retryClearDeltas = this.acceptsActiveModelEvent(event) ? this.setApiRetry(null) : [];
@@ -4525,6 +4612,18 @@ export class ProductProjection {
     this.contextWindowState.usedTokens = usedTokens;
     const maxTokens = payload.contextWindow ?? this.contextWindowState.maxTokens;
     const cumulative = this.snapshot.usage.cumulative;
+    // stats 与 cumulative 同累计点同门禁（isMainTurn 已过滤 sidecar/子代理请求），
+    // 同一补丁原子下发；见 docs/specs/2026-09-30-conversation-composer-stats-pills.md。
+    // 计时折叠（移植 DSH sessionStats）：llmMs = model_request → model_complete；
+    // ttftMs/ttftSteps = model_request → 首个 model_streaming；
+    // decodeMs/decodeTokens = 首个 model_streaming → model_complete（同一步）。
+    const stats = this.snapshot.stats;
+    const completedAtMs = this.ms(event);
+    const stepStartedAtMs = this.stepStartedAtMs;
+    const firstTokenAtMs = this.stepFirstTokenAtMs;
+    const outputTokens = usage.outputTokens ?? 0;
+    const hasFirstToken = firstTokenAtMs !== null;
+    const hasStepStart = stepStartedAtMs !== null;
     deltas.push({
       op: "state.updated",
       patch: {
@@ -4551,8 +4650,28 @@ export class ProductProjection {
             cacheWriteTokens: cumulative.cacheWriteTokens + (usage.cacheWriteTokens ?? 0),
           },
         },
+        stats: {
+          turns: stats.turns,
+          steps: stats.steps + 1,
+          llmMs: hasStepStart
+            ? stats.llmMs + Math.max(0, completedAtMs - stepStartedAtMs)
+            : stats.llmMs,
+          toolMs: stats.toolMs,
+          ttftMs:
+            hasStepStart && hasFirstToken
+              ? stats.ttftMs + Math.max(0, firstTokenAtMs - stepStartedAtMs)
+              : stats.ttftMs,
+          ttftSteps: hasStepStart && hasFirstToken ? stats.ttftSteps + 1 : stats.ttftSteps,
+          decodeMs: hasFirstToken
+            ? stats.decodeMs + Math.max(0, completedAtMs - firstTokenAtMs)
+            : stats.decodeMs,
+          decodeTokens: hasFirstToken ? stats.decodeTokens + outputTokens : stats.decodeTokens,
+        },
       },
     });
+    // 本步折叠完成，游标归位；下一步由下一条 model_request 重新打开。
+    this.stepStartedAtMs = null;
+    this.stepFirstTokenAtMs = null;
     // ModelComplete 是缺少 network completed 事件时的成功兜底，不能让重试提示悬挂。
     deltas.push(...retryClearDeltas);
     return deltas;

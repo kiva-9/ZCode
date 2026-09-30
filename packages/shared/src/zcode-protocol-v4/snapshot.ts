@@ -205,6 +205,26 @@ export const sessionUsageStateSchema = z.object({
 });
 export type SessionUsageState = z.infer<typeof sessionUsageStateSchema>;
 
+// ── stats（会话计量计数）。conflation：值未变不下发──
+// 单一所有者 = CLI ProductProjection；见 docs/specs/2026-09-30-conversation-composer-stats-pills.md。
+// 字段与 DSH SessionStatsProjection 逐字对齐（移植自 deepseek-harness）：
+// turns = userInput 且非 controlOnly 的 product turn；steps = 主轮 ModelComplete 次数；
+// llmMs = 主轮模型请求墙钟求和（model_request → model_complete）；
+// toolMs = 主轮工具执行用时求和（tool_call_result.duration）；
+// ttftMs/ttftSteps = 主轮首 token 延迟（model_request → 首个 model_streaming）；
+// decodeMs/decodeTokens = 主轮解码用时与输出 token（首个 streaming → model_complete）。
+export const sessionStatsStateSchema = z.object({
+  turns: z.number().int().nonnegative(),
+  steps: z.number().int().nonnegative(),
+  llmMs: z.number().int().nonnegative(),
+  toolMs: z.number().int().nonnegative(),
+  ttftMs: z.number().int().nonnegative(),
+  ttftSteps: z.number().int().nonnegative(),
+  decodeMs: z.number().int().nonnegative(),
+  decodeTokens: z.number().int().nonnegative(),
+});
+export type SessionStatsState = z.infer<typeof sessionStatsStateSchema>;
+
 // ── queue（不持久化，裁决：CLI 进程死亡即丢，客户端对账后由用户决定重发）──
 export const queueItemSchema = conversationInputIntentSchema.extend({
   dispatch: conversationInputDispatchSchema.extend({
@@ -488,6 +508,16 @@ export const conversationSnapshotSchema = z.object({
   // 持久化稳定事实供 live 客户端识别一次性提示；旧快照缺字段时不触发。
   modelTransition: sessionModelTransitionSchema.nullable().default(null),
   usage: sessionUsageStateSchema,
+  stats: sessionStatsStateSchema.default({
+    turns: 0,
+    steps: 0,
+    llmMs: 0,
+    toolMs: 0,
+    ttftMs: 0,
+    ttftSteps: 0,
+    decodeMs: 0,
+    decodeTokens: 0,
+  }),
   queue: queueStateSchema,
   pendingInteractions: z.array(pendingInteractionSchema),
   pendingCommands: z.array(commandStateSummarySchema),
