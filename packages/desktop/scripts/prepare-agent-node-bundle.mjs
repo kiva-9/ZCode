@@ -17,6 +17,7 @@ import { basename, dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { runCommand } from "../../../scripts/spawn-command.mjs";
+import { stageCuaDriverIntoBundledAgents } from "./cua-driver-package-assets.mjs";
 import { stageAgentBundle } from "./stage-agent-bundle.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -145,6 +146,24 @@ const officialPluginPackages = [
     runtimeBuildScript: "scripts/build.mjs",
     stagedPath: "packages/node-repl-host",
   },
+  {
+    // Computer Use 插件本体：只搬内容资产（skill/docs/client script），原生驱动不在这里 ——
+    // 它由 stageCuaDriver() 单独 stage 到 packages/node-repl-host/node_modules（落点理由见
+    // cua-driver-package-assets.mjs 的模块注释），所以 requiresRuntime 为 false 且不设
+    // runtimeBuildScript（设了会让 buildOfficialPluginRuntimes() 去跑一个不存在的构建脚本）。
+    // requiredSeedPaths 与 bootstrap/official-plugin-definitions.ts 的
+    // OFFICIAL_CUA_REQUIRED_SEED_PATHS 逐条一致；漏 stage 时 desktop 用户拿不到 Computer Use。
+    packageName: "@zcode/zcode-cua-plugin",
+    relativePath: "apps/zcode-cli/packages/zcode-cua-plugin",
+    requiresRuntime: false,
+    requiredRuntimePaths: [],
+    requiredSeedPaths: [
+      "docs/computer-use.md",
+      "scripts/computer-use-client.mjs",
+      "skills/computer-use/SKILL.md",
+    ],
+    stagedPath: "packages/zcode-cua-plugin",
+  },
 ];
 // 随 CLI 内置的技能包（不是插件）：bootstrap 的 resolveBundledSkillRoots 沿官方插件同款候选目录
 // 在 zcode.cjs 旁找 packages/bundled-skills 并原地读取。漏 stage 它，桌面包的 /workflow 会展开成
@@ -267,6 +286,37 @@ function stageBundle() {
   stageAgentBundle({ repoRoot, platformKey });
 }
 
+/**
+ * 把 Computer Use 驱动及其平台原生依赖 stage 进 glm 的 node_modules。
+ *
+ * 为什么必须在 stageBundle() 之后：stageAgentBundle 会**清空并重建** glm 目录
+ * （刻意的，避免上次构建残留的原生二进制被打进包），所以 staging 顺序反了会被删掉。
+ *
+ * 为什么需要：node-repl-host 的 bundle 用运行时 import() 加载原生驱动
+ * （esbuild 无法 bundle uniffi 的 .node），而 staged 树默认没有 node_modules ——
+ * 正式包里那一跳会 ERR_MODULE_NOT_FOUND。详见 cua-driver-package-assets.mjs 的模块注释。
+ */
+function stageCuaDriver() {
+  const { staged, triple } = stageCuaDriverIntoBundledAgents({
+    // 查找根与 electron-builder 的 runtimeModuleLookupRoots 同口径：根 node_modules
+    // 是 pnpm hoisted 布局下的主落点，desktop 自己的 node_modules 兜底。
+    lookupRoots: [repoRoot, desktopRoot],
+    glmDir,
+    // 与上面 platformKey 同源：支持 ZCODE_TARGET_OS / ZCODE_TARGET_ARCH 交叉准备。
+    targetPlatform: {
+      os: platform,
+      arch,
+      key: platformKey,
+      npmLibc: platform === "linux" ? "glibc" : undefined,
+    },
+  });
+  const bytes = staged.reduce((sum, item) => sum + item.size, 0);
+  console.log(
+    `[prepare:agent-bundle] staged Computer Use driver (${triple}): ` +
+      `${staged.length} packages, ${(bytes / 1024 / 1024).toFixed(1)} MiB`,
+  );
+}
+
 function stageOfficialPlugins() {
   for (const plugin of officialPluginPackages) {
     const sourceRoot = resolve(repoRoot, plugin.relativePath);
@@ -324,5 +374,7 @@ async function stageBundledSkillPack() {
 buildCliBundle();
 buildOfficialPluginRuntimes();
 stageBundle();
+// 必须排在 stageBundle() 之后：后者会清空并重建 glm，顺序反了刚 stage 的驱动会被删掉。
+stageCuaDriver();
 stageOfficialPlugins();
 await stageBundledSkillPack();

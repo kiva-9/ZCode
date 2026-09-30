@@ -21,6 +21,7 @@ import {
   resolveDesktopProductIdentity,
 } from "./scripts/desktop-product-identity.mjs";
 import { verifyStagedKoffi } from "./scripts/koffi-package-assets.mjs";
+import { verifyStagedCuaDriver } from "./scripts/cua-driver-package-assets.mjs";
 const ELECTRON_BUILDER_ARCH = {
   1: "x64",
   3: "arm64",
@@ -451,6 +452,26 @@ function assertPackagedNodePtyPrebuild(context) {
     throw new Error(`node-pty 预编译产物缺失: ${targetBinaryPath}`);
 }
 
+/**
+ * Computer Use 驱动的原生运行时必须随包。
+ *
+ * 为什么要有这条机械校验：node-repl-host 用运行时 import() 加载原生驱动
+ * （esbuild 无法 bundle uniffi 的 .node），而它自己不带 node_modules ——
+ * 驱动由 prepare-agent-node-bundle.mjs 的 stageCuaDriver() 单独 stage。
+ * 缺任何一个包，正式包的 Computer Use 都会在**用户第一次调用时**才
+ * ERR_MODULE_NOT_FOUND —— 构建全程绿灯，属于典型的静默失效。
+ * 这里让它在出包阶段就失败。
+ */
+function assertPackagedCuaDriver(context) {
+  const issues = verifyStagedCuaDriver({
+    resourcesDir: resolvePackagedResourcesDir(context),
+    targetPlatform,
+  });
+  if (issues.length > 0) {
+    throw new Error(`Computer Use 驱动运行时校验失败:\n- ${issues.join("\n- ")}`);
+  }
+}
+
 /** @type {import("electron-builder").Configuration} */
 export default {
   appId: desktopProductIdentity.appId,
@@ -562,6 +583,7 @@ export default {
     runTimedSync("afterPack:assertPackagedNodePtyPrebuild", () =>
       assertPackagedNodePtyPrebuild(context),
     );
+    runTimedSync("afterPack:assertPackagedCuaDriver", () => assertPackagedCuaDriver(context));
     if (actualWindowsTarget) {
       await runTimedAsync("afterPack:writeWindowsInstallManifest", () =>
         writeWindowsInstallManifest(context),
