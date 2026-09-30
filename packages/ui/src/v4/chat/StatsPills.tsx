@@ -25,6 +25,7 @@ import {
   shouldShowUsagePill,
   splitCompactDuration,
   totalBilledTokens,
+  uncachedInputTokens,
   type CumulativeUsage,
 } from "./sessionStatsFormat.js";
 
@@ -211,7 +212,7 @@ function UsagePill({ cumulative, open, onOpenChange }: {
           ) : null}
           <DetailRow
             label={intl.formatMessage({ id: "chat.stats.dialog.input" })}
-            value={exactNumberFormat.format(cumulative.inputTokens)}
+            value={exactNumberFormat.format(uncachedInputTokens(cumulative))}
           />
           <DetailRow
             label={intl.formatMessage({ id: "chat.stats.dialog.cacheRead" })}

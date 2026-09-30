@@ -5,7 +5,12 @@
 // docs/specs/2026-09-30-conversation-composer-stats-pills.md。
 import type { SessionStatsState, SessionUsageState } from "@zcode/shared/zcode-protocol-v4";
 
-/** usage.cumulative 的四个计费桶（inputTokens = 未缓存输入，与 DSH TokenUsageProjection 同构）。 */
+/**
+ * usage.cumulative 的四个计费桶。
+ * inputTokens 是提示侧**总量**口径（AI SDK total：原始未缓存输入 + 缓存读取 + 缓存写入，
+ * 见 @ai-sdk/anthropic convertAnthropicMessagesUsage 与 ai 核心 asLanguageModelUsage 的展平），
+ * 「未缓存输入」须用 uncachedInputTokens 派生；移植初期误当作独立未缓存口径，见 spec §8。
+ */
 export type CumulativeUsage = SessionUsageState["cumulative"];
 
 /** 旧快照 / 草稿态兜底：schema default 之前的零值。 */
@@ -28,9 +33,17 @@ export const ZERO_CUMULATIVE: CumulativeUsage = {
   cacheWriteTokens: 0,
 };
 
-/** 提示侧计费总量 = 未缓存输入 + 缓存读取 + 缓存写入（不含输出）。 */
+/**
+ * 未缓存输入 = 提示总量 − 缓存读取 − 缓存写入（即 AI SDK 的 noCacheTokens）。
+ * 理论上 inputTokens ≥ cacheRead + cacheWrite；防御性钳到 0，避免异常数据出现负数读数。
+ */
+export function uncachedInputTokens(usage: CumulativeUsage): number {
+  return Math.max(0, usage.inputTokens - usage.cacheReadTokens - usage.cacheWriteTokens);
+}
+
+/** 提示侧计费总量 = usage.inputTokens（总量口径已含缓存读取/写入，不重复相加）。 */
 export function billedInputTokens(usage: CumulativeUsage): number {
-  return usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+  return usage.inputTokens;
 }
 
 /** pill 展示总量 = 提示侧计费总量 + 输出（DSH UsagePill 的 total 口径）。 */

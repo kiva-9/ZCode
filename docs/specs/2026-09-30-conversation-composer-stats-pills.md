@@ -39,6 +39,8 @@
 
 用量 pill 的四个分桶直接读既有 `snapshot.usage.cumulative`（inputTokens / outputTokens / cacheReadTokens / cacheWriteTokens），不新增计数。
 
+**口径注记（2026-09-30 修正）**：`cumulative.inputTokens` 是提示侧**总量**口径（AI SDK total = 原始未缓存输入 + 缓存读取 + 缓存写入），「未缓存输入」按 `uncachedInputTokens = inputTokens − cacheReadTokens − cacheWriteTokens` 派生，详见 §8。
+
 ## 3. 相对 DSH 的取舍（验收时按 ZCode 语义核对）
 
 1. **数据管线完整移植**：`snapshot.stats` 8 字段与 DSH `SessionStatsProjection` 逐字对齐，由 CLI `ProductProjection` 折叠同一事件流：`llmMs` = model_request → model_complete；`ttftMs/ttftSteps` = model_request → 首个 model_streaming；`decodeMs/decodeTokens` = 首个 model_streaming → model_complete；`toolMs` = tool_call_result.duration（权威值），tool_call_error 不带 duration 时用 ToolCallStarted 配对补。侧车请求（标题/压缩/子代理/workflow_child）按 querySource 门禁排除，与 DSH「只数主会话可见步」一致。旧事件日志缺 model_request/model_streaming 时计时为零 → 速度不显示，计数仍正确。
@@ -90,3 +92,15 @@
 - 纯计算层：`packages/ui/test/conversationStatsPills.test.ts`（node:test，已执行 11/11 通过）——缓存命中取整、总量口径、pill 门禁、decode 速度、紧凑时长。
 - CLI 折叠（turns/steps/llmMs/toolMs/ttft/decode 累加、补丁原子性、侧车门禁）：本检出版未挂可运行单测入口（`packages/*/test` 下既有 node:test 文件在开源清理后已引用不存在的模块、无统一 runner），按要求如实记录为未覆盖，不谎报通过。
 - shared：snapshot/delta 的 additive default 与 round-trip 由 typecheck 与既有 schema 测试路径覆盖。
+
+## 8. 口径修正：inputTokens 是总量，未缓存输入需派生（2026-09-30）
+
+**现象**：用量面板「未缓存输入」与「缓存读取」数值几乎相等（实测 7,958,374 vs 7,843,008），缓存命中率显示 50%（= cacheRead ÷ (input + cacheRead)），与 provider 侧账单口径（命中率 ≈ 98.5%）不符。
+
+**根因**：移植时误把 `usage.cumulative.inputTokens` 当作「未缓存输入」独立口径。实际链路 `runner-normalization.ts` 透传 AI SDK v6 的 `usage.inputTokens`，而它是**提示侧总量**：`@ai-sdk/anthropic` 的 `convertAnthropicMessagesUsage` 归一为 `inputTokens = { total: raw + cacheRead + cacheWrite, noCache: raw, ... }`，`ai` 核心 `asLanguageModelUsage` 再展平为 `inputTokens = total` + `inputTokenDetails.{noCacheTokens, cacheReadTokens, cacheWriteTokens}`。协议折叠层（`product-projection.ts`）按字段直接累加，不改变口径。
+
+**修正**（只动 UI 纯推导层，协议字段与折叠层不动）：
+- `sessionStatsFormat.ts` 新增 `uncachedInputTokens(usage) = max(0, inputTokens − cacheReadTokens − cacheWriteTokens)`（即 AI SDK 的 `noCacheTokens`）；面板「未缓存输入」行改读派生值。
+- `billedInputTokens(usage)` 修正为返回 `usage.inputTokens`（提示侧总量已含缓存读/写，不再重复相加）；命中率分母与 pill 总量随之修正（实测：总量 800.0万、命中率 99%，与 provider 账单一致）。
+- `formatCacheHitPercent` 纯数学不变；`hasTokenActivity` 门禁不变。
+- 单测 `packages/ui/test/conversationStatsPills.test.ts` 改用总量口径夹具，并以实测数据（7,958,374 / 7,843,008 / 41,332 → 未缓存 115,366、命中 99%、总量 7,999,706）钉住回归。

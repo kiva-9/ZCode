@@ -14,6 +14,7 @@ import {
   shouldShowUsagePill,
   splitCompactDuration,
   totalBilledTokens,
+  uncachedInputTokens,
   type CumulativeUsage,
 } from "../src/v4/chat/sessionStatsFormat.ts";
 
@@ -30,10 +31,26 @@ const stats = (overrides: Partial<typeof ZERO_SESSION_STATS>) => ({
   ...overrides,
 });
 
-test("计费桶与总量：input+cacheRead+cacheWrite 为提示侧，+output 为总量", () => {
-  const usage = cumulative({ inputTokens: 100, outputTokens: 50, cacheReadTokens: 800, cacheWriteTokens: 50 });
+test("计费桶与总量：inputTokens 为提示侧总量（含缓存读/写），+output 为总量", () => {
+  const usage = cumulative({ inputTokens: 950, outputTokens: 50, cacheReadTokens: 800, cacheWriteTokens: 50 });
   assert.equal(billedInputTokens(usage), 950);
+  assert.equal(uncachedInputTokens(usage), 100);
   assert.equal(totalBilledTokens(usage), 1_000);
+});
+
+test("口径修正回归（实测数据）：未缓存输入 = inputTokens − cacheRead − cacheWrite", () => {
+  // GLM 实测：面板曾把总量 inputTokens 当作未缓存输入，命中率分母重复相加。
+  // 修正后：未缓存 115,366；命中率 = 7,843,008 / 7,958,374 ≈ 98.55% → 99；总量 7,999,706。
+  const usage = cumulative({ inputTokens: 7_958_374, outputTokens: 41_332, cacheReadTokens: 7_843_008 });
+  assert.equal(uncachedInputTokens(usage), 115_366);
+  assert.equal(billedInputTokens(usage), 7_958_374);
+  assert.equal(totalBilledTokens(usage), 7_999_706);
+  assert.equal(formatCacheHitPercent(usage.cacheReadTokens, billedInputTokens(usage)), "99");
+});
+
+test("未缓存输入：无缓存时等于 inputTokens；异常数据钳到 0", () => {
+  assert.equal(uncachedInputTokens(cumulative({ inputTokens: 500 })), 500);
+  assert.equal(uncachedInputTokens(cumulative({ inputTokens: 10, cacheReadTokens: 30 })), 0);
 });
 
 test("缓存命中：全命中显示 100", () => {
