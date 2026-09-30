@@ -67,6 +67,7 @@ import {
   type Locale,
   type AppSettings,
   PlatformChannels,
+  ZCODE_DISABLE_UPDATES,
   ZCODE_ENV,
   ZCODE_PRODUCT_FLAVOR,
   DEFAULT_ZCODE_ENDPOINT_ORIGIN,
@@ -2040,8 +2041,10 @@ app.whenReady().then(async () => {
   // 启动自动更新检查（后台执行，不阻塞主界面）
   // Preview 身份无论连接哪个后端都不自动更新：stable feed 上只分发正式 ZCode 安装包，
   // 不向 Preview 渠道提供更新。
+  // fork/自建包用构建期 ZCODE_DISABLE_UPDATES=1 彻底禁用：enabled:false 会跳过 setFeedURL
+  // 和轮询定时器，进程对官方更新端点零出网；运行时不提供改道/重开入口。
   void initAutoUpdater({
-    enabled: ZCODE_PRODUCT_FLAVOR === "production",
+    enabled: ZCODE_PRODUCT_FLAVOR === "production" && !ZCODE_DISABLE_UPDATES,
     onBeforeQuitAndInstall: async () => {
       notifyStabilityLifecycle("update_install");
       await prepareAppQuit("auto-update quitAndInstall", "update-install");
@@ -2284,7 +2287,9 @@ app.whenReady().then(async () => {
   // gate 照常生效，对真实用户零影响。
   const skipForceUpdateForLocalDevRuntime = !app.isPackaged;
   const forceUpdateGuardResult =
-    ZCODE_PRODUCT_FLAVOR === "production" && !skipForceUpdateForLocalDevRuntime
+    ZCODE_PRODUCT_FLAVOR === "production" &&
+    !skipForceUpdateForLocalDevRuntime &&
+    !ZCODE_DISABLE_UPDATES
       ? await maybeBlockStartupForForceUpdate({
           locale: currentApplicationLocale,
           logger,
@@ -2298,6 +2303,8 @@ app.whenReady().then(async () => {
     logger.info("[force-update] Preview 跳过远端强制升级检查");
   } else if (skipForceUpdateForLocalDevRuntime) {
     logger.info("[force-update] 本地 dev 构建（未打包）跳过远端强制升级检查");
+  } else if (ZCODE_DISABLE_UPDATES) {
+    logger.info("[force-update] 构建期禁用更新（ZCODE_DISABLE_UPDATES=1），跳过远端强制升级检查");
   }
   if (forceUpdateGuardResult.blocked) {
     return;

@@ -37,6 +37,21 @@ export const ZCODE_PRODUCT_FLAVOR = normalizeZCodeProductFlavor(
   typeof __ZCODE_PRODUCT_FLAVOR__ !== "undefined" ? __ZCODE_PRODUCT_FLAVOR__ : undefined,
   ZCODE_ENV,
 );
+
+declare const __ZCODE_DISABLE_UPDATES__: string | undefined;
+
+/**
+ * 构建期禁用开关（fork/自建包用，由 tsup/vite 注入 define）：为真时桌面端不初始化更新器、
+ * 不请求发布 manifest、跳过远端强制升级检查，并隐藏全部更新入口。
+ * 未注入 define 的 bundle（web、CLI、测试）恒为 false，不影响既有包行为。
+ */
+export function normalizeZCodeDisableUpdates(value: string | undefined): boolean {
+  return value?.trim() === "1";
+}
+
+export const ZCODE_DISABLE_UPDATES = normalizeZCodeDisableUpdates(
+  typeof __ZCODE_DISABLE_UPDATES__ !== "undefined" ? __ZCODE_DISABLE_UPDATES__ : undefined,
+);
 export const ZCODE_APP_VERSION_ENV = "ZCODE_APP_VERSION" as const;
 export const ZCODE_BUILD_COMMIT_ID_ENV = "ZCODE_BUILD_COMMIT_ID" as const;
 

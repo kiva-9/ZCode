@@ -12,6 +12,7 @@ import {
   resolveHelpAppConfig,
   resolveRuntimeZCodeEndpointOrigin,
   resolveZCodeEndpointOrigin,
+  ZCODE_DISABLE_UPDATES,
   ZCODE_ENV,
   ZCODE_PRODUCT_FLAVOR,
   type AppSettings,
@@ -592,10 +593,13 @@ export async function executeDesktopCommand(options: {
       return;
     case DesktopCommandIds.CheckForUpdates:
       // 按产品身份而不是后端环境放行：生产后端的 Preview 同样没有更新器。
-      if (ZCODE_PRODUCT_FLAVOR === "production") {
+      // fork 构建注入 ZCODE_DISABLE_UPDATES=1 后同样不放行，避免对未初始化的更新器发起手动检查。
+      if (ZCODE_PRODUCT_FLAVOR === "production" && !ZCODE_DISABLE_UPDATES) {
         checkForUpdateMenuClick(targetWindow);
       } else {
-        options.logger.info("[auto-update] Preview 已禁用手动更新检查");
+        options.logger.info(
+          "[auto-update] 更新入口已被产品身份或构建开关禁用，跳过手动更新检查",
+        );
       }
       return;
     case DesktopCommandIds.RelaunchApp:

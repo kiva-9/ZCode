@@ -5,6 +5,11 @@
  */
 export const ZCODE_PREVIEW_IDENTITY_ENV = "ZCODE_PREVIEW_IDENTITY";
 
+// 构建期开关：为真时桌面端不初始化更新器、不请求发布 manifest、跳过远端强制升级检查，
+// 并隐藏全部更新入口。fork/自建包注入 ZCODE_DISABLE_UPDATES=1 即彻底脱离官方更新体系，
+// 不必改用 Preview 身份（那会同时更换 appId/productName/数据目录）。
+export const ZCODE_DISABLE_UPDATES_ENV = "ZCODE_DISABLE_UPDATES";
+
 const PRODUCTION_IDENTITY = Object.freeze({
   flavor: "production",
   appId: "dev.zcode.app",
@@ -33,9 +38,8 @@ function normalizeDesktopZCodeEnv(env) {
 }
 
 /**
- * 开关只有一种开启拼写 `1`（`0` / 空 = 关闭），与 CI workflow 规则和 release 门的
- * `$ZCODE_PREVIEW_IDENTITY == "1"` 精确比较保持同一套语义。其它拼写在构建期直接失败，
- * 避免 `true` 之类在 YAML 路由层漏匹配、却在脚本层被当成开启，把 Preview 包打进生产验收目录。
+ * 开关只有一种开启拼写 `1`（`0` / 空 = 关闭），与 ZCODE_PREVIEW_IDENTITY 同一套精确语义；
+ * 其余拼写在构建期直接失败。
  */
 export function isPreviewIdentityRequested(env = process.env) {
   const value = env[ZCODE_PREVIEW_IDENTITY_ENV]?.trim() ?? "";
@@ -48,6 +52,15 @@ export function isPreviewIdentityRequested(env = process.env) {
   throw new Error(
     `invalid ${ZCODE_PREVIEW_IDENTITY_ENV}=${env[ZCODE_PREVIEW_IDENTITY_ENV]}; expected 1 or 0`,
   );
+}
+
+/**
+ * 与 isPreviewIdentityRequested 同为 fail-closed：只有精确 `1` 开启，
+ * 其余拼写（含 `true`）一律按关闭处理。禁用更新是收紧行为，不需要像 Preview 身份那样
+ * 在构建期对错误拼写硬失败暴露 YAML 路由问题。
+ */
+export function isDesktopUpdatesDisabled(env = process.env) {
+  return env[ZCODE_DISABLE_UPDATES_ENV]?.trim() === "1";
 }
 
 /**
