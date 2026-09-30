@@ -256,6 +256,7 @@ minos 13.0）+ `cua_driver_node_runtime.node` 1,712,400 B ≈ 53 MB。打包只�
 | **插件 seed 刷新**                                  | 清掉陈旧 cache 后重跑                                                                                                                                                 | [实测] cache 0.6.3 重新 seed 出 skills/scripts/docs；`skills list` 显示 `computer-use`；`plugins list` → `skills: 1`。**发现**该机原 cache 是 CE 仓库残留（含 `bump-zcode-cua-producer.mjs` 等工具脚本）且缺 skill/client —— seed 的 `missingSeedPaths` 守卫生效（拒绝写残缺缓存并告警回落），没有静默装出残缺插件 |
 | **宿主装配（AC-03 + 凭据）**                        | 生产代码路径（`resolveBuiltInNodeReplMcpServers` + `omitMcpServers` + `sanitizeZCodeRuntimeEnv`）                                                                     | [实测] 12/12：四种启用组合正确、CUA-only 不泄漏 BUA 文档 root、有凭据时注入 `ZCODE_CUA_NODE_REPL_HOST=1` + socket + authority + 插件身份、无凭据时不装配也不伪造                                                                                                                                                   |
 | **核心链路端到端**                                  | 装配点门控 → host 本地 broker → 进程内执行器（与 Worker 同路径）→ **插件自带 client script** → `agent.computerUse.capabilities()/diagnostics()/getApp().getAXState()` | [实测] 5/5 + 真实观察：驱动 0.28.2/bundled、权限双 granted（subject `/usr/local/bin/node`）、health 8 项、ChatGPT 窗口 AX 树真实读出                                                                                                                                                                               |
+| **安装包首启（AC-28）**                             | `pnpm --filter @zcode/desktop build` + `run bundle` → 解包 zip，**干净 HOME + cwd=/tmp**，只许访问安装包                                                              | [实测] 7/7：`afterPack:assertPackagedCuaDriver` 通过；包内 host 能解析 `@trycua/cua-driver`；驱动从**安装包 node_modules** 加载（0.28.2/bundled）；96 应用、9 在屏窗口、权限与诊断均真机返回。产物 `packages/desktop/dist/ZCode Preview-3.14.3-mac-arm64_TEST.{dmg,zip}`（dmg 207MB / zip 198MB）                  |
 | MCP stdio 传输层                                    | 自研 JSON-RPC client                                                                                                                                                  | [未验证] 本脚手架无法满足 SDK 2.0.0 的 2026-07-28 per-request envelope 握手（`server/discover` 探测 + 每次请求都要带 `io.modelcontextprotocol/*` envelope；带 ZCode 请求上下文时该 SDK 构建不响应）。生产走官方 `@modelcontextprotocol/client@2.0.0` + `versionNegotiation pin`，该路径未在无模型环境下复现        |
 
 **未验证项（不得当作通过）**：
@@ -263,7 +264,7 @@ minos 13.0）+ `cua_driver_node_runtime.node` 1,712,400 B ≈ 53 MB。打包只�
 1. ~~截图抵达模型消息~~ —— 2026-09-30 屏幕解锁后补测**通过**（见上表新增行）。
 2. `capture_after` 的真实后续观察、`verify_state` 真实调用。
 3. 桌面任务集（文本编辑 / 文件管理 / 表单）、10 轮稳定性。
-4. 安装包首启（干净数据目录、seed cache 解析、afterPack 校验）。
+4. ~~安装包首启~~ —— 2026-09-30 已从真实安装包 + 干净 HOME 验证通过（见上表）。**仍未验证**：安装态 TCC 授权（首次安装时授权主体是 ZCode.app，需用户实机确认）与「用户在设置页启用后由模型驱动」的完整回路。
 5. Windows / Linux 真机；macOS arm64 以外架构。
 6. Provider 三方协议（OpenAI Chat Completions / Anthropic Messages / Responses）的图片序列化
    在真实模型上的表现 —— 需凭证，未测；帧契约单测覆盖了形状与完整性。
