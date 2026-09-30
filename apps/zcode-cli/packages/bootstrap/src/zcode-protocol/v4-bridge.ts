@@ -131,8 +131,9 @@ function sessionUsageSeedFromRuntimeContextUsage(
       ...(contextUsage.cache ? { cache: contextUsage.cache } : {}),
       ...(contextUsage.breakdown ? { breakdown: contextUsage.breakdown } : {}),
     },
-    // 冷恢复用量还原：transcript 合成事件只带零用量占位，累计桶与 decodeTokens
-    // 从持久 assistant 消息汇总播种（StatsPills 重启后不从 0 起算）。
+    // 冷恢复用量还原：transcript 合成事件只带零用量占位，累计桶与全部 wall 计时
+    // （llmMs/ttftMs/ttftSteps/decodeMs/decodeTokens）从持久 assistant 消息汇总播种
+    // （StatsPills 重启后不从 0 起算，输出速度可恢复）。
     ...(usageTotals
       ? {
           cumulative: {
@@ -141,7 +142,13 @@ function sessionUsageSeedFromRuntimeContextUsage(
             cacheReadTokens: usageTotals.cacheReadTokens,
             cacheWriteTokens: usageTotals.cacheWriteTokens,
           },
-          stats: { decodeTokens: usageTotals.outputTokens },
+          stats: {
+            llmMs: usageTotals.llmMs,
+            ttftMs: usageTotals.ttftMs,
+            ttftSteps: usageTotals.ttftSteps,
+            decodeMs: usageTotals.decodeMs,
+            decodeTokens: usageTotals.outputTokens,
+          },
         }
       : {}),
   };

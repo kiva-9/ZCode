@@ -33,7 +33,8 @@
 
 - `turns`：`onTurnStarted` 中 `fact.turnHeaderOrigin === "userInput" && fact.executionKind !== "controlOnly"` 时 +1。compact/goal continuation/workflowLaunch 等维护轮不计。
 - `steps`/各计时：与既有 `usage.cumulative` 同一 ModelComplete 累计点、同一主轮门禁（`isMainTurn`），state.updated 与 usage 同一补丁原子下发；`toolMs` 在工具终态补丁内下发。
-- **冷恢复（2026-09-30 修复）**：transcript 合成的 ModelComplete 只带零用量占位（transcript-hydration.ts 显式「不重复累计 token」），重启后 `usage.cumulative` 与 `stats.decodeTokens` 曾从 0 起算、用量 pill 消失。现在 `SessionUsageSeed` 增补 `cumulative` + `stats.decodeTokens`，由 `sumPersistedUsageTotals`（`zcode-protocol/session-usage-totals.ts`，纯折叠 + 单测）从持久 assistant 消息的 `info.tokens` 汇总，经 `loadPersistedEvents`/`getSessionUsageSeed` 两条种子路径在 `seedUsage` 同守卫处播种；`turns`/`steps` 本就由 hydration 事件重放重建，`llmMs`/`ttftMs`/`decodeMs` 等原始流计时不在持久事实内，重启后保持 0（速度不显示，计数与用量恢复）。
+- **冷恢复（2026-09-30 修复）**：transcript 合成的 ModelComplete 只带零用量占位（transcript-hydration.ts 显式「不重复累计 token」），重启后 `usage.cumulative` 与 `stats` 全部 token/计时字段曾从 0 起算、用量 pill 消失。现在 `SessionUsageSeed` 增补 `cumulative` + 全量 `stats`（llmMs/ttftMs/ttftSteps/decodeMs/decodeTokens），由 `sumPersistedUsageTotals`（`zcode-protocol/session-usage-totals.ts`，纯折叠 + 单测）从持久 assistant 消息汇总，经 `loadPersistedEvents`/`getSessionUsageSeed` 两条种子路径在 `seedUsage` 同守卫处播种；`turns`/`steps` 本就由 hydration 事件重放重建。
+- **计时的持久事实链**：`AssistantMessageInfo.time.firstTokenAt`（contracts additive 可选字段，消息整列 JSON 存储、无 migration）由 `turn-model-step.ts` 在流式首个非空增量（文本/推理）时打点，经 `persistCompletedAssistantStep`/`persistToolModelStepFinish` → `persistAssistantMessage` 落盘；llmMs = created→completed，ttftMs = created→firstTokenAt，decodeMs = firstTokenAt→completed，均以消息级持久时间戳求和，重启后输出速度一并恢复。旧消息缺 firstTokenAt 时 ttft/decode 记 0（不编造），llmMs 与计费桶不受影响；compact 后的会话按 compact 后历史汇总（与 contextWindow 种子同口径）。
 
 用量 pill 的四个分桶直接读既有 `snapshot.usage.cumulative`（inputTokens / outputTokens / cacheReadTokens / cacheWriteTokens），不新增计数。
 
