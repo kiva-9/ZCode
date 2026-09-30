@@ -1,6 +1,8 @@
 # Computer Use 集成设计记录
 
-**状态：** 实现完成（P0/P1 路径），macOS arm64 部分真实验证；安装包与 Windows/Linux 未验证。
+**状态：** macOS arm64 新包重建、手动签名副本启动、官方 MCP 握手及真实模型 TextEdit
+写入/读回/SDK 停止已验证。设置页权限真值与完整视觉/GUI 停止回路未通过验收；
+Windows/Linux 未验证。2026-09-30 本次用户要求不新增屏幕录制授权，完成当前草稿测试后收尾。
 **驱动基线：** `@trycua/cua-driver@0.28.2`（精确锁定，`packages/zcode-cua/package.json`）。
 **本文档是设计记录与验证报告**，不是需求文档（需求见产品 PRD）。所有结论都标注了证据来源：
 [实测] = 在本机对锁定版本真实执行过；[代码] = 读源码/锁文件确认；[未验证] = 没有证据。
@@ -210,8 +212,8 @@ minos 13.0）+ `cua_driver_node_runtime.node` 1,712,400 B ≈ 53 MB。打包只�
   不声明的话整个驱动树会被 seed 静默裁掉，症状是安装包首启第一次调用才
   ERR_MODULE_NOT_FOUND，而构建全程绿灯。
 - 只带目标平台：macOS arm64 包不含六个平台的二进制。
-- [未验证] 没有打包环境：afterPack 校验、`glm → resources/glm` 拷贝、seed cache 首启解析
-  都未实跑。
+- [实测] 打包 staging / afterPack / 包内 host 驱动解析已验证（§8、§8.1）。
+  seed cache 首启解析的早期证据见 §8；当前新包完整 GUI 验收仍有未完成项。
 
 ### 7.2 产品身份轴：`ZCODE_ENV` 与 `ZCODE_PREVIEW_IDENTITY`（实跑踩坑）
 
@@ -248,7 +250,9 @@ electron-builder 会**清空 `directories.output`**，所以两种身份的构�
 
 ---
 
-## 8. 真实验证报告（macOS 27.0.1 arm64，Node v24.18.0）
+## 8. 首轮真实验证报告（macOS 27.0.1 arm64，Node v24.18.0）
+
+本节原表保留首轮证据；最新新包、真实模型及检查结果以 §8.1 为准。
 
 | 项                                                  | 命令/方式                                                                                                                                                             | 结果                                                                                                                                                                                                                                                                                                               |
 | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -272,17 +276,84 @@ electron-builder 会**清空 `directories.output`**，所以两种身份的构�
 | **宿主装配（AC-03 + 凭据）**                        | 生产代码路径（`resolveBuiltInNodeReplMcpServers` + `omitMcpServers` + `sanitizeZCodeRuntimeEnv`）                                                                     | [实测] 12/12：四种启用组合正确、CUA-only 不泄漏 BUA 文档 root、有凭据时注入 `ZCODE_CUA_NODE_REPL_HOST=1` + socket + authority + 插件身份、无凭据时不装配也不伪造                                                                                                                                                   |
 | **核心链路端到端**                                  | 装配点门控 → host 本地 broker → 进程内执行器（与 Worker 同路径）→ **插件自带 client script** → `agent.computerUse.capabilities()/diagnostics()/getApp().getAXState()` | [实测] 5/5 + 真实观察：驱动 0.28.2/bundled、权限双 granted（subject `/usr/local/bin/node`）、health 8 项、ChatGPT 窗口 AX 树真实读出                                                                                                                                                                               |
 | **安装包首启（AC-28）**                             | `pnpm --filter @zcode/desktop build` + `run bundle` → 解包 zip，**干净 HOME + cwd=/tmp**，只许访问安装包                                                              | [实测] 7/7：`afterPack:assertPackagedCuaDriver` 通过；包内 host 能解析 `@trycua/cua-driver`；驱动从**安装包 node_modules** 加载（0.28.2/bundled）；96 应用、9 在屏窗口、权限与诊断均真机返回。产物 `packages/desktop/dist/ZCode Preview-3.14.3-mac-arm64_TEST.{dmg,zip}`（dmg 207MB / zip 198MB）                  |
-| MCP stdio 传输层                                    | 自研 JSON-RPC client                                                                                                                                                  | [未验证] 本脚手架无法满足 SDK 2.0.0 的 2026-07-28 per-request envelope 握手（`server/discover` 探测 + 每次请求都要带 `io.modelcontextprotocol/*` envelope；带 ZCode 请求上下文时该 SDK 构建不响应）。生产走官方 `@modelcontextprotocol/client@2.0.0` + `versionNegotiation pin`，该路径未在无模型环境下复现        |
+| MCP stdio 传输层                                    | 首轮自研 JSON-RPC client；本次改用官方 SDK                                                                                                                            | 首轮脚手架未完成握手；2026-09-30 官方 `@modelcontextprotocol/client@2.0.0` + 协议 pin 已通过新包握手与 `js` 调用，见 §8.1                                                                                                                                                                                          |
 
-**未验证项（不得当作通过）**：
+**首轮未验证项及本次进展（不得当作全项通过）**：
 
 1. ~~截图抵达模型消息~~ —— 2026-09-30 屏幕解锁后补测**通过**（见上表新增行）。
 2. `capture_after` 的真实后续观察、`verify_state` 真实调用。
 3. 桌面任务集（文本编辑 / 文件管理 / 表单）、10 轮稳定性。
-4. ~~安装包首启~~ —— 2026-09-30 已从真实安装包 + 干净 HOME 验证通过（见上表）。**仍未验证**：安装态 TCC 授权（首次安装时授权主体是 ZCode.app，需用户实机确认）与「用户在设置页启用后由模型驱动」的完整回路。
+4. ~~安装包首启~~ —— 已有包内加载证据；本次又通过新包 GUI 启动与真实模型 AX 文稿回路。
+   **仍未验证**：干净安装首次 TCC 授权、设置页权限真值、GUI 停止按钮及视觉动作。
 5. Windows / Linux 真机；macOS arm64 以外架构。
 6. Provider 三方协议（OpenAI Chat Completions / Anthropic Messages / Responses）的图片序列化
    在真实模型上的表现 —— 需凭证，未测；帧契约单测覆盖了形状与完整性。
+
+### 8.1 2026-09-30 新包与真实模型复测
+
+**范围：** 用户批准重建本地包、临时复制已有 BigModel 登录/provider 配置、启用测试实例
+电脑控制。最后明确不授予新的屏幕录制权限，要求完成当前草稿验证后收尾。
+本次不是 AC-01～AC-30 全部验收通过。
+
+**源码与产物：** 起始 `main@0916056`。首次完整重建在 bootstrap 的 v4-bridge 两处调用
+因 `MessageWithParts[]` 与 `UsageTotalsMessageLike[]` 的 summary 类型不兼容报 TS2345。
+先更新 StatsPills spec，补 user-summary 对象的回归测试，再把输入类型对齐为公开契约
+`MessageInfo["summary"]`；运行时聚合逻辑未改。修复提交为 `1af878b`。
+第二次 `pnpm build:desktop:local` 成功，重建时该补丁尚未提交，包内 Git 元数据可能仍显示
+旧提交，不能只按版本号或 Git 字段判断源码是否包含补丁。
+
+| 验证项       | 本次证据与结果                                                                                                                                                                                                                                                  |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 工具链       | 构建及类型检查使用 Node 24.14.0、pnpm 10.33.2；匹配 `mise.toml`                                                                                                                                                                                                 |
+| 完整重建     | `pnpm build:desktop:local` 成功，prepare、Agent/desktop build、afterPack 的驱动/原生资源检查通过                                                                                                                                                                |
+| 产物         | `packages/desktop/dist-local/mac-arm64/ZCode.app`；`dist-local/` 下有 `ZCode-3.14.3-mac-arm64.dmg`（约 198 MiB）、`.zip`（约 189 MiB）                                                                                                                          |
+| DMG 完整性   | `hdiutil verify` 通过；SHA-256 `9085ec4c15ac1617f4dafa3db9b85b0cd84fef90b329d73a023e5fa22ad5dff9`                                                                                                                                                               |
+| ZIP 识别     | SHA-256 `8c880deb1b8422a1bb5bfa1ffe98b352340f94e876ec4ec516e99a037b9c5942`；GUI 测试使用同次生成的解包 app                                                                                                                                                      |
+| 默认包启动   | 新包在临时 Desktop 数据/profile/cwd 下启动、登录成功，实际 Agent 命令和 node_repl 权限主体均来自包内 `ZCode Helper`                                                                                                                                             |
+| 手动签名启动 | 新包副本经 `codesign --force --deep --sign 'ZCode Local Dev Codesign'` 及 `--verify --deep --strict` 通过；新进程存活并显示登录页。未测 Developer ID、公证或 Gatekeeper                                                                                         |
+| MCP envelope | 官方 SDK 2.0.0，`versionNegotiation.mode.pin='2026-07-28'`；连接新包 `node-repl-host/dist/mcp/server.js`，`connect`、`listTools`、带 ZCode request context 的 `callTool(js)` 均成功                                                                             |
+| 真实模型诊断 | GLM-5.3 实际调用内置 `node_repl` 和插件 client。驱动 0.28.2、loadSource=bundled、原生 darwin-arm64 存在；AX=granted、Screen Recording=denied                                                                                                                    |
+| 授权主体     | 真实模型报告 `permissionSubject=<新包>/Contents/Frameworks/ZCode Helper.app/Contents/MacOS/ZCode Helper`；health 的 `bundle_identity=fail`（进程无 CFBundleIdentifier），不能称为首次安装身份/授权验证通过。单独 Node MCP smoke 的授权主体是 Node，不代替此证据 |
+| 设置页       | 开关启用后模型工具可用；两个权限行持续「未知」。点击辅助功能链接后未确认进入系统设置。此项未通过，根因未证实；不能用模型侧权限报告覆盖 UI 失败                                                                                                                  |
+| 真实文本回路 | 模型先读取 TextEdit `未命名` 文稿，定位 `First Text View` 的 AXTextArea，调用 `setValue` 写入 `ZCODE-CUA-VALIDATION-20260930-HELLO`，再读回匹配；工具原始回执及独立桌面 AX 读回一致                                                                             |
+| SDK 停止     | 实际工具调用 `agent.computerUse.stop('validation complete')` 成功；JS 返回 void，工具结构化回执为 `{stopped:true,reason:'validation complete'}`。没有实测 GUI 停止按钮或停止后的动作拒绝                                                                        |
+| 本次图片路径 | 未截图、未执行视觉动作；屏幕录制 denied，用户拒绝新增授权。首轮 raster/宿主投影结果不代表新包图片抵达远端模型已通过                                                                                                                                             |
+
+本次执行的检查：
+
+- `node scripts/check-workspace-freshness.mjs`：通过。
+- `pnpm typecheck`：通过；`pnpm lint`：exit 0，67 warnings、0 errors。
+- `pnpm --dir apps/zcode-cli typecheck`：27/27 tasks 通过。工作区 turbo 包存在但 bin 不在
+  CLI 的 PATH，临时把 `node_modules/turbo/bin` 加入 PATH 后执行，未修改依赖或 lockfile。
+- `pnpm --dir apps/zcode-cli lint`：失败。未修改的 core/debug/telemetry 文件已有 max-lines
+  错误；core 为 30 errors/11 warnings，debug 和 telemetry 各 2 errors，随后任务取消。
+  root lint 配置忽略 CLI，因此 root lint 通过不等于 CLI lint 通过。
+- `pnpm architecture:check --changed`：0 violations；目标 `zcode-cli` context 为 unmanaged。
+- `pnpm --filter @zcode/zcode-cua test`：53/53；权限服务测试：12/12；设置入口测试：3/3。
+  UI 测试使用 `TSX_TSCONFIG_PATH=packages/ui/tsconfig.json`，不能按 root tsconfig 执行。
+- bootstrap typecheck/build 通过；usage totals 测试 7/7。两个修改的 TS 文件在去掉 CLI
+  ignore 的临时 lint 配置下为 0 warnings/0 errors，单文件格式检查通过。
+  StatsPills spec 全文件格式检查已有基线失败，未顺带重排旧内容。
+
+**隔离与收尾：** Desktop 使用 `/tmp/zcode-cu-validation/adhoc/` 下独立 data、userData、
+sessionData、home 和 cwd，并显式指定包内 `GLM_BINARY_PATH`。收尾发现 CLI session store
+仍使用 `~/.zcode/cli/db/db.sqlite`（源码 `adapters/src/storage/session-store/paths.ts`），
+CLI config/插件市场目录也在共享 `~/.zcode/cli` 下。所以本次不能称为完全隔离；
+两条测试会话保留在共享 CLI 数据库中。未删除其它共享数据。
+设置页在插件初始化完成后再次核对并关闭电脑控制；新包和手动签名副本均正常退出，
+临时复制的 credentials/provider/config 及 Desktop data/profile 目录已移除，TextEdit 已退出。
+收尾将生成的测试文稿保存并移到 `/tmp/zcode-cu-validation/TextEdit-validation.rtf` 留证；
+这发生在模型测试结束后。未改动系统 TCC 授权，未安装替换 `/Applications/ZCode.app`。
+
+本机暂存证据在 `/tmp/zcode-cu-validation/`：`rebuild.log`、`dmg-verify.log`、
+`mcp-smoke-result.json`、`model-diagnostics-tools.json`、`model-draft-tools.json` 和检查日志。
+其中模型回执仅从本次已知 fixture session 导出，不读取其它会话内容；临时路径不保证长期留存。
+
+**继续验收的缺口：** 设置页权限真值与系统设置链接；新包截图/视觉控制抵达实际模型；
+GUI 停止按钮及同 cell 后续动作拒绝；跨窗口旧 state_id；后台拒绝不自动前台；
+`capture_after` 回执及异常语义（本次 setValue 走默认路径，但未独立核对回执）、
+原生 `verify_state`；文本/文件/表单任务各 10 轮；三种 Provider 图片协议与其它平台。
+自动签名脚本的缺陷另见交接文档 §4.3，未在本次顺带修复。
 
 ---
 

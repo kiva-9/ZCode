@@ -14,32 +14,37 @@
 设计记录（已包含源码地图、驱动兼容性表、移植修正清单、真实验证报告）：
 `docs/development/computer-use.md`。使用文档：`docs/computer-use.md`。
 
-一句话现状：**运行时、宿主装配、设置页入口、权限探测、打包 staging 都已实现并有测试；
-真正没做完的只有「授权之后的 GUI 实机回路」**（见 §5）。
+一句话现状：**新包已重建，官方 MCP client 握手、手动签名副本启动、真实模型的
+TextEdit「观察 → setValue → 读回 → SDK stop」已通过。设置页权限仍显示「未知」，
+截图及 GUI 停止按钮等验收仍未完成。用户本次明确不新增屏幕录制授权，要求收尾。**
+最新证据、检查结果及隔离边界见 `docs/development/computer-use.md` §8.1。
 
 ## 2. 现在能跑通 / 不能跑通
 
 | 已实跑通过                                                                             | 证据                                                                                   |
 | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | 驱动在进程内加载（`@trycua/cua-driver@0.28.2`，darwin-arm64）                          | `docs/development/computer-use.md` §8                                                  |
-| list_apps / list_windows / get_app_state / 全部动作 / stop / 租约 / 快照绑定           | `packages/zcode-cua/test` **53 例全过**                                                |
+| 方法路由 / stop / 租约 / 快照绑定的契约回归                                            | `packages/zcode-cua/test` **53 例全过（假驱动，不等于所有原生动作实测）**              |
 | 截图→模型链路（真实 raster + image_ref + 完整性 attestation + 宿主 exact-raster 路径） | 同上，6/6 真机                                                                         |
 | 安装包首启（AC-28）：干净 HOME + 安装包 node_modules 里加载驱动                        | 同上，7/7                                                                              |
-| 设置页「电脑控制」入口 + 权限状态 + 打开系统设置面板                                   | 提交 `b6fb49f`                                                                         |
-| typecheck / lint / oxfmt                                                               | 干净                                                                                   |
+| 设置页启用、真实模型 TextEdit 写入/读回、SDK stop                                      | 2026-09-30 新包真实会话；独立 AX 读回相同测试字符串                                    |
+| 官方 SDK 2.0.0 MCP stdio 握手及工具调用                                                | 新包 host，协议 pin `2026-07-28`，`connect/listTools/callTool` 通过                    |
+| 手动自签名副本启动                                                                     | 深度签名与严格验证通过；新进程存活并显示登录页，未测公证/Gatekeeper                    |
+| typecheck / lint                                                                       | root typecheck 通过；root lint 67 warnings/0 errors；CLI typecheck 通过，CLI lint 失败 |
 | **当前构建出的 app**                                                                   | `packages/desktop/dist-local/mac-arm64/ZCode.app`（正式身份 `dev.zcode.app` / 3.14.3） |
 
-| 未验证（这就是你要做的）                | 说明                                                                                                                          |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **用户在系统设置授权后，整条 GUI 回路** | 见 §5 的复测步骤                                                                                                              |
-| 签名后的 app 能否正常启动               | 见 §4.3 的悬案                                                                                                                |
-| Windows / Linux 真机                    | 无对应机器                                                                                                                    |
-| MCP stdio 传输层 envelope 握手          | SDK 2.0.0 的 2026-07-28 per-request envelope，自研脚手架满足不了；生产用官方 `@modelcontextprotocol/client`，需在真实会话里验 |
-| 安装态 TCC 授权主体                     | 未在干净安装环境验过                                                                                                          |
+| 未验证（这就是你要做的）    | 说明                                                                                  |
+| --------------------------- | ------------------------------------------------------------------------------------- |
+| **完整 GUI 回路与权限引导** | 设置页两个权限行仍「未知」；点击权限链接未确认打开系统设置；GUI 停止按钮未实测        |
+| 新包屏幕录制与截图          | 实际模型进程报告 denied；用户本次不授权，未执行新包截图/视觉动作                      |
+| 原生边界与稳定性            | 同 cell 停止后拒绝、跨窗口旧 state_id、后台拒绝不自动前台及三类任务 10 轮仍需实机验收 |
+| Windows / Linux 真机        | 无对应机器                                                                            |
+| 干净安装的首次 TCC 授权     | 本次模型实际主体为包内 `ZCode Helper`，已读到状态；未测试从未授权到授权的转换         |
+| 三种 Provider 图片协议      | 未用真实图片请求验证 Chat Completions / Anthropic Messages / Responses                |
 
 ## 3. 提交与分支
 
-`git log --oneline 961ed19..HEAD` 应看到 10 个提交（若已被合并/变基，按内容认）：
+以下为最初集成提交索引；当前提交数量会随合并变化，按内容认：
 
 ```
 99ec/991863d feat(desktop): 本地自签名证书脚本 + 构建签名接线（默认 opt-in）
@@ -56,6 +61,10 @@ bef30ec     docs: 桌面装配与核心链路的真机验证
 ```
 
 **动手前先 `git status`**：另一位会话可能正在改代码，不要覆盖。
+
+本次重建基于 `0916056`，包含本地修复 `1af878b`（`MessageInfo["summary"]` 联合类型，
+解决 bootstrap 构建 TS2345；先补 spec 和 user-summary 回归测试）。修复无运行时行为变化。
+构建时该补丁尚未提交，因此不要把包内 Git 元数据当成最终提交的证明。所有提交仍未 push。
 
 ## 4. 已知的坑（按踩过的顺序，都是实测）
 
@@ -75,14 +84,17 @@ bef30ec     docs: 桌面装配与核心链路的真机验证
 授权静默失效。`pnpm build:desktop:local` 有签名接线但默认关闭（见 4.3），要开就
 `ZCODE_LOCAL_CODESIGN=1 node scripts/build-desktop-local.mjs`。
 
-### 4.3 悬案：签名后的 app 启动表现未结论
+### 4.3 手动签名副本已验证启动；构建签名接线仍有缺陷
 
 本地自签名证书已生成并导入登录钥匙串（`scripts/setup-local-codesign-cert.mjs`，幂等）：
 
 - `codesign --verify --deep --strict` **通过**，`Authority=ZCode Local Dev Codesign`；
-- 但签名后 app 启动不了；**同时段把未签名的另一份 app 也启动不了**，而系统应用
-  TextEdit 正常 → 怀疑是图形会话层面的问题，不是签名本身。
-- 接手人请先复现「app 到底能不能启动」再判断签名方案。
+- 早先签名/未签名 app 同时起不来的现象没有归因，不能据此判定签名导致启动失败。
+- 本次将新包复制到 `/tmp/zcode-cu-validation/signed/ZCode.app`，手动签名、严格验证后
+  用独立数据目录启动，进程存活并渲染登录页。此项已通过。
+- `scripts/build-desktop-local.mjs` 的 opt-in 签名分支仍未修复：`spawnSync` 未导入，
+  探测会捕获 ReferenceError 并返回 false；`signMacApp` 中两个异步 `run` 未 await。
+  本次默认打包跳过签名，没有验证这条自动签名分支。
 
 不需要这个证书时删干净：`node scripts/setup-local-codesign-cert.mjs --remove`。
 （证书文件在 `~/.zcode-local-codesign/`，仓库外，不入库。）
@@ -118,26 +130,19 @@ do shell script "/usr/bin/open -n /Users/kiva/Documents/Zcode/packages/desktop/d
   `list_apps` 看不到刚启动的 app）。遇到时不要以为是代码回归，先 `open -a TextEdit`
   确认会话还活着，过一会再试。
 
-## 5. 下一步：复测授权后的 GUI 回路（核心）
+## 5. 本次收尾与后续验收
 
-前置：构建产物 = `packages/desktop/dist-local/mac-arm64/ZCode.app`（见 §4.4；
-需要带最新代码就重新 `pnpm build:desktop:local`，但**先问过用户**，他可能在改代码）。
+本次不再申请系统授权或继续扩大测试。后续只有用户重新要求时继续：
 
-1. 启动：`/usr/bin/open -n packages/desktop/dist-local/mac-arm64/ZCode.app --args --open-workspace /Users/kiva/Documents/Zcode`
-   （app 起不来的话先看 §4.3 和 §4.6）
-2. 系统设置 → 隐私与安全性 → 辅助功能：删掉所有 ZCode 条目，用 `Cmd+Shift+G` 粘贴
-   **`/Users/kiva/Documents/Zcode/packages/desktop/dist-local/mac-arm64/ZCode.app`** 添加；
-   屏幕录制同样再来一遍。
-3. **完全退出并重启 ZCode**（TCC 只对新进程生效）。
-4. 设置 → 电脑控制 → 打开「启用电脑控制」→ 两个权限行应显示**已授权**（不再是「未知」）。
-   点击链接应能直接打开对应系统设置面板。
-5. 在对话里让模型做一个真实任务（例如「打开文本编辑，输入 hello」，然后用只读方式确认），
-   观察：观察 → 点击/输入 → 再观察 → 停止按钮 全链路。
-6. 重点回归这几条（PRD 的安全底线）：
-   - 点「停止电脑控制」后，同一个 REPL cell 再发动作必须被拒（`controller_busy`），
-     不能重连/重试恢复；
-   - 窗口换了之后，旧 state_id 的动作必须被拒；
-   - 后台投递被拒时**不能**自动改成前台。
+1. 先调查设置页权限探测失败：模型侧已读到真实权限，但设置页仍未知；原因尚未证实。
+2. 检查 CLI 的独立存储配置。仅设置 Desktop 的 data/userData/session/home 目录不能证明
+   CLI 隔离；本次测试会话仍写入 `~/.zcode/cli/db/db.sqlite`，config/插件市场目录也共享。
+3. 若用户允许新的系统授权，确认真实责任进程和包路径，只调整该测试对象；不要删除
+   所有同名 ZCode TCC 条目。授权后按需完整重启并用实际捕获验证。
+4. 验证设置页权限真值、系统设置链接、截图抵达真实模型、GUI 停止按钮。
+5. 实机验证停止后同 cell 动作拒绝、跨窗口旧 state_id 拒绝、后台拒绝不自动前台。
+6. 补 `capture_after` 回执、`verify_state` 原生谓词、文本/文件/表单各 10 轮、三个 Provider
+   图片协议与其它平台。已有假驱动测试及宿主投影验证不能代替这些验收。
 
 ## 6. 关键文件索引
 
@@ -157,9 +162,14 @@ do shell script "/usr/bin/open -n /Users/kiva/Documents/Zcode/packages/desktop/d
 
 ## 7. 现场状态（交接时）
 
-- 测试用的 TextEdit 已退出；ZCode 当前**没有**在跑。
+- 测试用的 TextEdit 与本次启动的 ZCode 测试进程均已退出；其它 ZCode 实例不属于本次收尾范围。
 - 登录钥匙串里有一张「ZCode Local Dev Codesign」自签名证书（§4.3），不需要就
   `node scripts/setup-local-codesign-cert.mjs --remove`。
-- `packages/desktop/dist-local/mac-arm64/ZCode.app` 当前是 **ad-hoc 签名**（我把它从
-  自签名改回了 ad-hoc，方便你重新做 §5 的对照实验）。
+- `packages/desktop/dist-local/mac-arm64/ZCode.app` 已重新构建；默认跳过正式代码签名，
+  主可执行文件只有 linker 的 ad-hoc 签名。DMG/ZIP 同步刷新，DMG 校验通过。
+- 隔离实例「启用电脑控制」已关闭，Desktop 测试进程与 TextEdit 已正常退出。
+- 复制到测试 data 目录的登录凭据、provider/config，以及临时 Desktop profile 已移除。
+  CLI 共享数据库中的两条测试会话保留，未删除其它共享数据，不能称为完全隔离测试。
+- 测试草稿已移至 `/tmp/zcode-cu-validation/TextEdit-validation.rtf`；旧 app 备份、手动签名
+  副本与测试日志、工具回执在 `/tmp/zcode-cu-validation/`，临时目录不保证长期保存。
 - 工作区干净，所有改动已提交。
