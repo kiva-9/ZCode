@@ -445,6 +445,7 @@ import {
 } from "./runtime-tools/agentProxyEnv.js";
 import { ensureAppCaCert } from "./runtime-tools/appCaCert.js";
 import { buildHelperOpenArgs, isCuaLocalDevelopmentRuntime } from "@zcode/zcode-cua/broker/server";
+import { probeOpenSourceCuaPermissions } from "./cua-permission-broker/cuaOpenSourcePermissions.js";
 import {
   canRunOpenSourceCuaDriver,
   resolveCuaProductHelperSpawnEnv,
@@ -742,6 +743,40 @@ export function shouldCreateDefaultCuaProductHelper(opts: {
     !opts.hasRemoteWorkspaceIdentity &&
     !opts.hasInjectedResolver
   );
+}
+
+/** 开源驱动探测结果 → 设置页读的 CuaPermissionStatus 形状。 */
+function toCuaPermissionStatusView(report: {
+  grantOwner: string;
+  grantOwnerDisplayName: string | null;
+  accessibility: "granted" | "stale" | "denied" | "unknown";
+  screenRecording: "granted" | "stale" | "denied" | "unknown";
+  screenCaptureProbeOk: boolean;
+}): {
+  grantOwner: string;
+  grantOwnerDisplayName: string | null;
+  accessibility: "granted" | "stale" | "denied" | "unknown";
+  accessibilityProbeOk: boolean;
+  screenRecording: "granted" | "stale" | "denied" | "unknown";
+  screenCaptureProbeOk: boolean;
+} {
+  return {
+    grantOwner: report.grantOwner,
+    grantOwnerDisplayName: report.grantOwnerDisplayName,
+    accessibility: report.accessibility,
+    accessibilityProbeOk: report.accessibility === "granted",
+    screenRecording: report.screenRecording,
+    screenCaptureProbeOk: report.screenCaptureProbeOk,
+  };
+}
+
+/**
+ * agent bundle 的平台目录名（darwin-arm64 等），与 desktop 打包 staging 同源。
+ * 仅供 CUA 开源驱动定位；拿不到时由候选解析自行退化。
+ */
+function resolveBundledAgentPlatformKey(): string | undefined {
+  const arch = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x64" : process.arch;
+  return `${process.platform}-${arch}`;
 }
 
 export function shouldUseCuaPermissionService(opts: {
@@ -1974,10 +2009,19 @@ export function createLocalServices(options: {
           stable = await launchStandaloneCuaHelperForStatus();
         }
         if (!stable) {
+          // 没有 Helper transport = 本构建（开源版）不随包携带官方 Helper。
+          // 权限真值改问开源驱动自己的 check_permissions（只读；授权主体由它自述）。
+          // 否则设置页永远停在「未知」，用户也无法触发系统授权 —— 等于没有权限引导。
+          const openSource = await probeOpenSourceCuaPermissions({
+            resourcesPath: (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath,
+            cwd: process.cwd(),
+            env: process.env,
+            platformKey: resolveBundledAgentPlatformKey(),
+          });
+          if (openSource.available) return toCuaPermissionStatusView(openSource);
           return {
             available: false,
-            reason:
-              "ZCode Computer Use is not running; it will start automatically on first Computer Use use.",
+            reason: `${openSource.reason}. It will start automatically on first Computer Use use.`,
             idle: true,
           } satisfies { available: false; reason: string; idle: true };
         }
@@ -2004,9 +2048,18 @@ export function createLocalServices(options: {
             screenCaptureProbeOk: false,
           };
         } catch {
+          // Helper broker 不可用（开源构建的 broker/server 是 fail-closed 占位）时同样回落到
+          // 开源驱动探测，避免把「没有 Helper」显示成「正在启动」后卡在验证中。
+          const openSource = await probeOpenSourceCuaPermissions({
+            resourcesPath: (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath,
+            cwd: process.cwd(),
+            env: process.env,
+            platformKey: resolveBundledAgentPlatformKey(),
+          });
+          if (openSource.available) return toCuaPermissionStatusView(openSource);
           return {
             available: false,
-            reason: "ZCode Computer Use is starting up; retry in a moment.",
+            reason: `${openSource.reason}; retry in a moment.`,
             idle: true,
           } satisfies { available: false; reason: string; idle: true };
         }

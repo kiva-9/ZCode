@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { app, BrowserWindow, ipcMain, nativeImage, screen } from "electron";
 import { PlatformChannels, type CuaPermissionKind, type Locale } from "@zcode/shared";
+import { probeOpenSourceCuaPermissions } from "@zcode/services/cua-permission-broker";
 import {
   cuaHelperBundleFingerprintUnchanged,
   openCuaPermissionOnboarding,
@@ -501,6 +502,23 @@ export function registerCuaPermissionIpcHandlers(options: {
           }
         },
         logger: options.logger,
+        // 开源构建不随包携带官方 Helper：Helper 安装失败时，只要开源驱动可用
+        // （@trycua/cua-driver 已 stage 进 agent bundle），授权引导退化为直接打开
+        // 系统设置面板。没有 Helper 时上面那条 fail-closed 会把唯一可用的授权入口挡掉。
+        probeOpenSourcePermissions: async () => {
+          if (process.platform !== "darwin") return { available: false };
+          try {
+            const report = await probeOpenSourceCuaPermissions({
+              resourcesPath: process.resourcesPath,
+              cwd: process.cwd(),
+              env: process.env,
+              platformKey: `${process.platform}-${process.arch === "arm64" ? "arm64" : process.arch}`,
+            });
+            return { available: report.available };
+          } catch {
+            return { available: false };
+          }
+        },
       });
     } finally {
       // 会话终态（成功/取消/超时/origin destroyed）一律销毁浮窗。PiP 面板曾因为缺少这条

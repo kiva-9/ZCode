@@ -42,7 +42,10 @@ const HIDDEN_SETTINGS_SECTIONS = new Set<SettingsSectionId>([
   // 工作区搜索（.zcodeignore）设置入口先隐藏：规则文件仍生效并可手动编辑，
   // 编辑页代码保留，放开时从这里移除即可。
   "workspaceFileSearch",
-  "computerUse",
+  // 电脑控制曾在「开源版不随包携带 Computer Use」期间隐藏（占位运行时，入口点了也没有
+  // 可用的东西）。运行时已换成 @trycua/cua-driver 后这里放开：设置页的启用开关、双权限
+  // 状态行与授权引导都是用户实际使用 Computer Use 的唯一入口，隐藏它等于功能不可发现。
+  // 注意 computerUse 仍只在桌面端出现（createSettingsPageConfig 的 isDesktop 门）。
 ]);
 
 interface SettingsSectionIntentEventDetail {

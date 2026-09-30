@@ -104,3 +104,5 @@ export { createCuaPipSessionService } from "./cuaPipSessionService.js";
 export { ICuaPipSessionService } from "./cuaPipSession.js";
 export type { CuaPipPresentationCredentials } from "./cuaPipSessionService.js";
 export type { CuaPipSessionService } from "./cuaPipSession.js";
+
+export * from "./cuaOpenSourcePermissions.js";
