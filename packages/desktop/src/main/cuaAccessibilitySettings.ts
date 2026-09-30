@@ -43,6 +43,12 @@ interface OpenCuaAccessibilitySettingsOptions {
     error?: (...args: unknown[]) => void;
   };
   ensureHelperInstalled?: () => Promise<string>;
+  /**
+   * 开源构建的权限探测（本构建不随包携带官方 Helper）。返回 available=true 时，
+   * 授权引导退化为「直接打开系统设置面板」：授权主体是运行驱动的宿主进程，
+   * 不需要把任何 .app 拖进 TCC 列表。生产由 IPC 层注入；测试可注入假实现。
+   */
+  probeOpenSourcePermissions?: () => Promise<{ available: boolean }>;
   /** 测试或宿主显式注入；生产默认从 Electron Resources 解析随包 Helper。 */
   bundledHelperAppPath?: string;
   /** 每个 TCC stage 启动前重新执行完整安装验签；生产默认使用 installer.verifyInstalled。 */
@@ -526,6 +532,22 @@ export async function openCuaPermissionOnboarding(
     // TeamIdentifier pinning 的授权主体”这一核心边界。dev 场景由 installer 内部的
     // ZCODE_CUA_HELPER_ALLOW_UNSIGNED_LOCAL 承接：通过 dev 校验时 ensureInstalled 会正常返回本地 app，
     // 根本不会进到这个 catch；只有真正校验失败才会到这里。
+    //
+    // 开源构建没有 Helper 可装，这条 fail-closed 会把唯一可用的授权引导也一起挡掉：
+    // 设置页两个权限行永远「未知」、按钮点了只弹「暂时无法确认」，用户无法触发系统授权。
+    // 因此 Helper 缺失但开源驱动可用时，授权引导退化为直接打开系统设置面板 ——
+    // 这时不存在「把 .app 拖进列表」的对象（驱动跑在宿主进程里，授权主体由
+    // check_permissions 的 source 自述），也就不需要 Helper 身份验签。
+    const openSource = options.probeOpenSourcePermissions
+      ? await options.probeOpenSourcePermissions()
+      : { available: false };
+    if (openSource.available) {
+      const required = normalizeRequiredPermissions(options);
+      const first = required[0] ?? "accessibility";
+      const openSettings = options.openSettingsUrl ?? ((url: string) => shell.openExternal(url));
+      await openSettings(settingsUrlForPermission(first));
+      return { success: true, returnedFromSettings: false };
+    }
     return {
       success: false,
       error: `ZCode Computer Use is unavailable (install/verification failed): ${messageOf(error)}`,
