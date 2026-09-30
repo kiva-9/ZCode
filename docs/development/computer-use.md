@@ -213,6 +213,21 @@ minos 13.0）+ `cua_driver_node_runtime.node` 1,712,400 B ≈ 53 MB。打包只�
 - [未验证] 没有打包环境：afterPack 校验、`glm → resources/glm` 拷贝、seed cache 首启解析
   都未实跑。
 
+### 7.2 产品身份轴：`ZCODE_ENV` 与 `ZCODE_PREVIEW_IDENTITY`（实跑踩坑）
+
+打包产物名由**产品身份**决定，与后端环境是两个轴（`packages/desktop/scripts/desktop-product-identity.mjs`）：
+
+| 命令                                                           | 解包 app                                      | 安装包名                                       |
+| -------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------- |
+| `pnpm --filter @zcode/desktop run bundle`（未设 `ZCODE_ENV`）  | `dist/mac-arm64/ZCode Preview.app`            | `ZCode Preview-<ver>-mac-arm64_TEST.{dmg,zip}` |
+| `ZCODE_ENV=production pnpm --filter @zcode/desktop run bundle` | `dist/mac-arm64/ZCode.app`（`dev.zcode.app`） | `ZCode-<ver>-mac-arm64.{dmg,zip}`              |
+
+electron-builder 会**清空 `directories.output`**，所以两种身份的构建会互相覆盖解包目录。
+本次实跑中先用默认（Preview/TEST）身份出过一次包，把工作树里既有的
+`dist/mac-arm64/ZCode.app`（本地 dev 启动入口）覆盖成了 `ZCode Preview.app`；
+随后用 `ZCODE_ENV=production` 重建恢复。**教训**：动这个目录前先确认身份，
+并先备份已有的解包 app 与安装包。
+
 ### 7.1 构建期修复：驱动必须保持运行时 import（实测）
 
 `node-repl-host` 的 esbuild 原本会把 `@trycua/cua-driver`（连同 `@ubjs/*` 的平台解析）
