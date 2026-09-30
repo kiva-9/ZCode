@@ -50291,3 +50291,46 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ```
+
+---
+
+## Computer Use driver (added manually — pending regeneration)
+
+This section was added by hand and is not part of the generated output above. It
+is a manual record pending regeneration of this file with
+`node scripts/licenses.mjs notices`, which rebuilds the whole file from the
+workspace production dependency graph. Recorded on 2026-09-30.
+
+`@zcode/zcode-cua` v0.6.3 (Apache-2.0, this repository) declares
+`@trycua/cua-driver@0.28.2` in its `dependencies`. The driver's optional
+platform packages and the `@ubjs/*` bindings below are resolved transitively.
+
+| Group | Package(s) | Version | License identifier |
+| --- | --- | --- | --- |
+| Root driver | `@trycua/cua-driver` | 0.28.2 | MIT |
+| Platform packages | `@trycua/cua-driver-darwin-arm64`, `@trycua/cua-driver-darwin-x64`, `@trycua/cua-driver-linux-x64-gnu`, `@trycua/cua-driver-linux-arm64-gnu`, `@trycua/cua-driver-win32-x64-msvc`, `@trycua/cua-driver-win32-arm64-msvc` | 0.28.2 | MIT AND MPL-2.0 |
+| UBJSON bindings | `@ubjs/core`, `@ubjs/node`, plus the platform-specific `@ubjs/node-<triple>` builds resolved alongside them | 0.31.0-3 | MPL-2.0 |
+
+Notes:
+
+- The root `@trycua/cua-driver` tarball ships **no LICENSE file**. The MIT
+  attribution recorded above is the `license` field of that package's
+  `package.json`, not a bundled license text.
+- The six platform packages declare the combined expression
+  `"MIT AND MPL-2.0"`. They ship `node-runtime-NOTICE.md`, which states that the
+  bundled `cua_driver_node_runtime.node` derives from the
+  uniffi-bindgen-react-native 0.31.0-3 N-API runtime (MPL-2.0), and that the
+  corresponding source is available at the matching release tag in
+  github.com/trycua/cua.
+- `@ubjs/core` and `@ubjs/node` are MPL-2.0, as are the `@ubjs/node-<triple>`
+  platform builds resolved with them.
+- This section is a manual record pending regeneration by
+  `node scripts/licenses.mjs notices`; once the file is regenerated, this
+  section can be dropped.
+- The vendored `computer-use` plugin (manifest name `computer-use`, version
+  0.6.1, author Z.ai) declares `"license": "MIT"`. Its four files —
+  `.zcode-plugin/plugin.json`, `skills/computer-use/SKILL.md`,
+  `docs/computer-use.md` and `scripts/computer-use-client.mjs` — come from the
+  upstream official distribution of the same project (zai-org/ZCode, Apache-2.0
+  at the repository root). The MIT attribution is preserved as declared, not
+  rewritten.
