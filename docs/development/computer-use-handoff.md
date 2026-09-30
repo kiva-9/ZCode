@@ -2,7 +2,8 @@
 
 > 用途：把下面内容整段交给下一位开发者（人或 Agent），他应当能在不重复提问的情况下
 > 继续完成剩余验证。生成时间：2026-09-30。仓库：`/Users/kiva/Documents/Zcode`。
-> **未 push**：所有提交都在本地 `main` 上（见 §3），origin 是 `kiva-9/ZCode`。
+> **推送目标**：用户已授权将本地 `main` 的全部提交推送到 fork `kiva-9/ZCode` 的 `origin/main`。
+> 实时同步状态以 `git fetch origin` 后的 `git status` 为准。
 
 ---
 
@@ -64,7 +65,8 @@ bef30ec     docs: 桌面装配与核心链路的真机验证
 
 本次重建基于 `0916056`，包含本地修复 `1af878b`（`MessageInfo["summary"]` 联合类型，
 解决 bootstrap 构建 TS2345；先补 spec 和 user-summary 回归测试）。修复无运行时行为变化。
-构建时该补丁尚未提交，因此不要把包内 Git 元数据当成最终提交的证明。所有提交仍未 push。
+构建时该补丁尚未提交，因此不要把包内 Git 元数据当成最终提交的证明。
+本次用户已授权将全部本地提交推送到 fork 的 `origin/main`。
 
 ## 4. 已知的坑（按踩过的顺序，都是实测）
 
