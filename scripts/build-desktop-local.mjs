@@ -21,24 +21,35 @@
  * 用法：
  *   node scripts/build-desktop-local.mjs                 # mac arm64：安装包 + 解包 app
  *   node scripts/build-desktop-local.mjs --skip-prepare  # agent bundle 已 stage 过时跳过准备（快很多）
+ *   ZCODE_LOCAL_CODESIGN=1 node scripts/build-desktop-local.mjs  # 用本地证书签名（默认关，见下方说明）
+ *   node scripts/build-desktop-local.mjs --no-sign       # 跳过本地证书签名
  *   node scripts/build-desktop-local.mjs --os win        # 其它平台（透传给 bundle.mjs）
  *
  * 其它透传参数见 `node packages/desktop/scripts/bundle.mjs --help`。
  */
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../..");
 const desktopRoot = resolve(repoRoot, "packages/desktop");
 const distDirName = "dist-local";
+/**
+ * 本地自签名证书的 CN（由 scripts/setup-local-codesign-cert.mjs 生成并导入登录钥匙串）。
+ * 用它签名后 macOS TCC 按「bundle id + 证书」绑定授权，重建不再失效；
+ * ad-hoc 签名只能按 CDHash 绑定，每次构建都要重新授权。
+ */
+const LOCAL_CODESIGN_IDENTITY = "ZCode Local Dev Codesign";
+const LOCAL_CODESIGN_CERT_DIR = join(homedir(), ".zcode-local-codesign");
 // 只透传 bundle.mjs 真实支持的参数；不自己发明开关（曾发明过 --zip-only，
 // 被 bundle.mjs 的严格参数校验直接拒掉）。
 const PASSTHROUGH_ARGS = new Set(["--dry-run", "--skip-prepare", "--skip-build"]);
 const args = process.argv.slice(2);
 const passthrough = args.filter((arg) => PASSTHROUGH_ARGS.has(arg));
+const skipSign = args.includes("--no-sign");
 
 function run(command, commandArgs, env) {
   return new Promise((resolveRun, rejectRun) => {
@@ -60,6 +71,41 @@ function run(command, commandArgs, env) {
       );
     });
   });
+}
+
+/**
+ * 本地证书是否可用（用 codesign 实签判定，不靠 find-identity —— 私钥 ACL 下它枚举不到）。
+ */
+function localCodesignAvailable() {
+  try {
+    const probe = join(LOCAL_CODESIGN_CERT_DIR, ".probe");
+    if (!existsSync(LOCAL_CODESIGN_CERT_DIR)) return false;
+    writeFileSync(probe, "probe");
+    const result = spawnSync("codesign", ["--force", "--sign", LOCAL_CODESIGN_IDENTITY, probe], {
+      encoding: "utf8",
+    });
+    const detail = spawnSync("codesign", ["-dvv", probe], { encoding: "utf8" });
+    rmSync(probe, { force: true });
+    const authority = `${detail.stdout ?? ""}${detail.stderr ?? ""}`
+      .match(/Authority=(.+)/)?.[1]
+      ?.trim();
+    return result.status === 0 && authority === LOCAL_CODESIGN_IDENTITY;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 给解包 app 签名并严格校验。
+ *
+ * 只用 `--force --deep --sign`：实测（0.28.2 之后的 Electron 41 产物）一步通过，
+ * 嵌套的 Frameworks/*.app 由 --deep 覆盖，且 `codesign --verify --deep --strict` 通过。
+ * 不要在签名前先单独签嵌套 bundle：外层 app 的 CodeResources 会记录嵌套件哈希，
+ * 先改嵌套件再签外层时报 "unsealed contents"（实测踩过）。
+ */
+function signMacApp(appPath) {
+  run("codesign", ["--force", "--deep", "--sign", LOCAL_CODESIGN_IDENTITY, appPath]);
+  run("codesign", ["--verify", "--deep", "--strict", appPath]);
 }
 
 const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
@@ -84,6 +130,40 @@ const distRoot = resolve(desktopRoot, distDirName);
 const appPath = resolve(distRoot, "mac-arm64", "ZCode.app");
 const dmgPath = resolve(distRoot, "ZCode-3.14.3-mac-arm64.dmg");
 const zipPath = resolve(distRoot, "ZCode-3.14.3-mac-arm64.zip");
+
+// 签名（显式 opt-in，默认关闭）：让 TCC 授权跨构建保持稳定（ad-hoc 每次重建
+// CDHash 都变，授权静默失效）。
+//
+// 为什么默认关闭：本地自签名证书能用 `codesign --verify --deep --strict`
+// （实测通过），但**签名后的 app 能否正常启动尚未结论** —— 同一时段未签名的 app
+// 也不启动（系统应用 TextEdit 正常），怀疑是图形会话层面的问题。接手人复测确认
+// app 能起来后再改成默认开启。
+//
+//   ZCODE_LOCAL_CODESIGN=1 node scripts/build-desktop-local.mjs   # 开启签名
+//   node scripts/build-desktop-local.mjs --no-sign               # 显式跳过
+if (
+  process.platform === "darwin" &&
+  !skipSign &&
+  process.env.ZCODE_LOCAL_CODESIGN === "1" &&
+  existsSync(appPath)
+) {
+  if (localCodesignAvailable()) {
+    console.log(`[build:desktop:local] 用本地证书签名（${LOCAL_CODESIGN_IDENTITY}）…`);
+    try {
+      signMacApp(appPath);
+      console.log("[build:desktop:local] ✅ 签名并校验通过");
+    } catch (error) {
+      console.log(
+        `[build:desktop:local] ⚠️ 签名失败，保留原产物（仍是 ad-hoc）：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  } else {
+    console.log(
+      "[build:desktop:local] ⚠️ 未找到本地签名证书，跳过签名（TCC 授权将在下次重建后失效）。" +
+        "修复：node scripts/setup-local-codesign-cert.mjs",
+    );
+  }
+}
 
 console.log("\n[build:desktop:local] 完成，产物：");
 if (existsSync(appPath)) console.log(`  解包 app  ${appPath}`);
