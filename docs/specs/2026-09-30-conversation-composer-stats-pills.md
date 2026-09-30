@@ -6,11 +6,12 @@
 
 ## 1. 行为概述
 
-在 V4 会话窗口 composer 下方新增计量行（ZCode 首个 DSH StatsPills 移植件）：
+在 V4 会话窗口 composer **输入框工具条内**新增两个统计 pill（ZCode 首个 DSH StatsPills 移植件），位于原「上下文窗口圆形计量器」左侧并列：
 
-- **时间 pill**（gauge 图标）：`{轮}轮 {步}步 · {速度} tok/s`，点击弹出「会话统计」面板（轮次 / 模型步数 / 输出速度）。
+- **时间 pill**（gauge 图标）：`{轮}轮 {步}步 · {速度} tok/s`，点击弹出「会话统计」面板（模型用时 / 工具调用用时 / 首 token 平均 / 输出速度）。
 - **用量 pill**（database 图标）：`{总量} tok · 缓存命中 {百分比}%`，点击弹出「Token 用量」面板（缓存命中、未缓存输入、缓存读取、缓存写入、输出）。
-- 原有「上下文窗口计量」（`ChatContextUsage`）从工具条行**下移**到计量行下方一行，展示与交互不变。
+- 原有「上下文窗口计量」（`ChatContextUsage` 圆形计量器）**保持原位不动**（工具条左簇起点），仅把两个 pill 放在它左边。
+- 新会话（草稿态，sessionId=null）无任何计量数据：StatsPills 整体不渲染，圆形计量器留在原位——新旧会话视觉一致，无需分支逻辑。
 - 两个 pill 互斥打开（一个开则另一个关）；点击外部 / Esc 关闭。
 
 ## 2. 数据与状态所有者
@@ -46,9 +47,10 @@
 
 ## 4. UI 落点与交互
 
-- `packages/ui/src/v4/chat/StatsPills.tsx`：纯展示组件，props 收 `stats`、`cumulative`；`sessionStatsFormat.ts` 承载全部纯计算（取整/门禁/速度/时长）。弹层用 Radix `Popover`（`side="top"`，视口钳制由 Radix 负责），排他打开状态在组件内。
-- `packages/ui/src/v4/composer/V4ComposerUsageRow.tsx`：composer 输入框 surface 正下方的新行容器 = StatsPills 行 + 下移的 `ChatContextUsage` 行。 entitlement / coding plan / start plan 等 context usage 所需的 hooks 从 `V4ComposerToolbar` 整块搬迁到本组件（职责随行迁移，不复制两份）。
-- `V4ComposerToolbar`：删除 `ChatContextUsage` 渲染及其独占 wiring（`useCodingPlanEntitlements`、`useUsageEntitlement` team access、`useSettings`、codingPlanUsageRemaining、contextStartPlanBalance、access 刷新等）；保留 `usage` prop（仍服务 `TID_V4_MODEL_CONFIG` 的 data-usage-* e2e 锚点）与 `onSendCompressionCommand` 改由新行组件接收。压缩按钮禁用条件由 `disabled || recoveryPending` 收敛为 `disabled`（recoveryPending 是工具条内部模型恢复态，发送门禁在宿主已覆盖）。
+- `packages/ui/src/v4/chat/StatsPills.tsx`：纯展示组件，props 收 `stats`、`cumulative`；`sessionStatsFormat.ts` 承载全部纯计算（取整/门禁/速度/时长）。弹层用 Radix `Popover`（`side="top"`，视口钳制由 Radix 负责），排他打开状态在组件内。pill 文案 `truncate` + 容器 `min-w-0`，窄容器下收缩不撑爆工具条。
+- `packages/ui/src/v4/composer/V4ComposerToolbar.tsx`：渲染位 = `TID_V4_MODEL_CONFIG` 锚点 span 之后、模型选择分支之前——**StatsPills 在左、ChatContextUsage 圆形计量器在右**，计量器位置与语义（entitlement wiring）与搬迁前一致。
+- `packages/ui/src/v4/composer/useChatContextUsagePanel.ts`：ChatContextUsage 的全部输入配置（displayProvider / taskUsage / codingPlanUsageRemaining / startPlanBalance）收敛为单一 hook，工具条调用；不复制第二份 entitlement 链路。
+- `V4ComposerToolbar` 新增 `stats` prop（ConversationComposer 传 `snapshot.stats ?? ZERO_SESSION_STATS`）；`onSendCompressionCommand` 回归工具条 props；压缩按钮禁用条件恢复为 `disabled || recoveryPending`（与原版一致）。
 - e2e 锚点保持：`TID_CHAT_CONTEXT_USAGE_TRIGGER`、`TID_V4_MODEL_CONFIG`（含 data-usage-used/data-usage-max）。
 
 ## 5. 文案（i18n）
@@ -76,9 +78,10 @@
 | 3 | 有用量累计的会话                                 | 用量 pill 显示 `总量 tok · 缓存命中 X%`；X <100 时不显示 100       |
 | 4 | 无 token 活动（全部请求失败）                     | 两个 pill 均不渲染（与 DSH 的 hasTokens/steps 门禁一致）          |
 | 5 | 点击时间 pill / 用量 pill                        | 弹出对应面板，两pill互斥；Esc / 点击外部关闭                      |
-| 6 | 上下文计量位置                                   | 位于计量行下方；hover 面板内容与交互不变                          |
-| 7 | 旧快照（无 stats 字段）解析                      | schema default 生效，pill 显示 0 轮 0 步                          |
-| 8 | 冷恢复（进程重启后回到会话）                     | stats 由 hydration 事件重放聚出，与 usage.cumulative 同语义        |
+| 6 | 计量器位置                                       | 圆形计量器留在工具条原位（两个 pill 左侧）；hover 面板交互不变     |
+| 7 | 新会话（草稿态）                                 | 两个 pill 不渲染；圆形计量器仍在原位，布局与改动前一致           |
+| 8 | 旧快照（无 stats 字段）解析                      | schema default 生效，pill 显示 0 轮 0 步                          |
+| 9 | 冷恢复（进程重启后回到会话）                     | stats 由 hydration 事件重放聚出，与 usage.cumulative 同语义        |
 
 ## 7. 测试
 

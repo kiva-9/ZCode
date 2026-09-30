@@ -1,15 +1,15 @@
-// V4 composer 计量行：输入框 surface 正下方的新行容器。
-// - 第一行：DSH 移植的 StatsPills（会话轮次/步数/速度 + 总 tok/缓存命中），见 v4/chat/StatsPills.tsx；
-// - 第二行：从 V4ComposerToolbar 下移的上下文窗口计量（ChatContextUsage），展示与交互不变。
-// 搬迁依据与验收：docs/specs/2026-09-30-conversation-composer-stats-pills.md。
-// 原工具条里只服务 ChatContextUsage 的 entitlement / coding plan / start plan wiring 整块随行迁移，
-// 不保留第二份；压缩入口禁用条件收敛为 disabled（recoveryPending 是工具条内部模型恢复态，
-// 发送门禁在宿主已覆盖，spec 3.5 有记录）。
-import { memo, useCallback, useEffect, useMemo, useRef } from "react";
-import type { ZCodeProvider } from "@zcode/shared";
-import type { SessionConfigState, SessionStatsState, SessionUsageState } from "@zcode/shared/zcode-protocol-v4";
-import { BUILTIN_MODEL_PROVIDER_IDS, ZCODE_AGENT_PROVIDER } from "@zcode/shared";
-import { ChatContextUsage } from "@/chat-input-toolbar/display.js";
+// ChatContextUsage（上下文窗口圆形计量器）的配置计算 hook。
+// 从 V4ComposerUsageRow 抽出，供两个渲染位共用同一份数据路径：
+// - 会话态：计量行内 StatsPills 右侧（V4ComposerUsageRow）；
+// - 新会话/草稿态：输入框工具条原位置（V4ComposerToolbar）。
+// 两处按 sessionId 互斥渲染，配置计算不复制第二份。
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import {
+  BUILTIN_MODEL_PROVIDER_IDS,
+  ZCODE_AGENT_PROVIDER,
+  type ZCodeProvider,
+} from "@zcode/shared";
+import type { SessionConfigState, SessionUsageState } from "@zcode/shared/zcode-protocol-v4";
 import {
   hasChatCodingPlanUsageRemaining,
   type ChatCodingPlanUsageRemainingConfig,
@@ -46,30 +46,45 @@ import {
   resolveContextCodingPlanUsageSource,
   resolveV4ContextPlanConnection,
 } from "./v4ContextUsage.js";
-import { StatsPills } from "../chat/StatsPills.js";
-import { ZERO_CUMULATIVE } from "../chat/sessionStatsFormat.js";
 
-export interface V4ComposerUsageRowProps {
-  /** 当前展示中的 provider（宿主透传，与 ChatContextUsage 搬迁前一致）。 */
+export interface ChatContextUsagePanelParams {
+  /** 当前展示中的 provider（宿主透传）。 */
   provider?: ZCodeProvider;
   /** 当前 scope 的 Composer 草稿选择；context plan 连接按 effectiveConfig.provider 解析。 */
   draftConfig?: Partial<SessionConfigState>;
+  /** snapshot.usage；contextWindow → taskUsage 投影。 */
   usage: SessionUsageState | null;
-  /** 会话计量（snapshot.stats）；旧快照缺省时宿主传零值。 */
-  stats: SessionStatsState;
-  disabled: boolean;
-  onSendCompressionCommand?: (command: string) => void;
 }
 
-function V4ComposerUsageRowImpl({
+export interface ChatContextUsagePanel {
+  displayProvider: ZCodeProvider;
+  taskUsage: ReturnType<typeof projectTaskUsage>;
+  codingPlanUsageRemaining: ChatCodingPlanUsageRemainingConfig | undefined;
+  startPlanBalance: ChatStartPlanBalanceConfig | undefined;
+}
+
+function projectTaskUsage(usage: SessionUsageState | null) {
+  const contextWindow = usage?.contextWindow;
+  if (!contextWindow) return null;
+  return {
+    used: contextWindow.usedTokens,
+    size: contextWindow.maxTokens,
+    ...(contextWindow.cache ? { cache: contextWindow.cache } : {}),
+    ...(contextWindow.breakdown ? { breakdown: contextWindow.breakdown } : {}),
+  };
+}
+
+/**
+ * ChatContextUsage 的全部输入配置：模型身份、taskUsage 投影、coding plan 剩余额度、
+ * start plan 余额。语义与从 V4ComposerToolbar 搬迁时逐字一致（entitlement/coding plan/
+ * start plan wiring 原样保留）。
+ */
+export function useChatContextUsagePanel({
   provider,
   draftConfig,
   usage,
-  stats,
-  disabled,
-  onSendCompressionCommand,
-}: V4ComposerUsageRowProps) {
-  const { intl, locale } = useZCodeIntl();
+}: ChatContextUsagePanelParams): ChatContextUsagePanel {
+  const { intl } = useZCodeIntl();
   const { openCodingPlanUpgrade } = useCodingPlanUpgradeDialog();
   const displayProvider = provider ?? ZCODE_AGENT_PROVIDER;
   // 有效模型身份与搬迁前 V4ComposerToolbar 同一解析（草稿态取草稿选择）。
@@ -367,36 +382,12 @@ function V4ComposerUsageRowImpl({
       ? codingPlanUsageRemainingConfig
       : undefined;
 
-  const taskUsage = useMemo(() => {
-    const contextWindow = usage?.contextWindow;
-    if (!contextWindow) return null;
-    return {
-      used: contextWindow.usedTokens,
-      size: contextWindow.maxTokens,
-      ...(contextWindow.cache ? { cache: contextWindow.cache } : {}),
-      ...(contextWindow.breakdown ? { breakdown: contextWindow.breakdown } : {}),
-    };
-  }, [usage?.contextWindow]);
+  const taskUsage = useMemo(() => projectTaskUsage(usage), [usage]);
 
-  return (
-    <div className="flex w-full min-w-0 flex-col gap-1" data-testid="v4-composer-usage-row">
-      {/* 计量行第一行：DSH StatsPills 移植件（无数据整行不渲染）。 */}
-      <StatsPills stats={stats} cumulative={usage?.cumulative ?? ZERO_CUMULATIVE} />
-      {/* 计量行第二行：从工具条下移的上下文窗口计量。 */}
-      <div className="flex min-w-0 items-center px-2">
-        <ChatContextUsage
-          codingPlanUsageRemaining={codingPlanUsageRemaining}
-          taskUsage={taskUsage}
-          startPlanBalance={contextStartPlanBalance}
-          selectedProvider={displayProvider}
-          intl={intl}
-          locale={locale}
-          onSendCompressionCommand={onSendCompressionCommand}
-          compressionDisabled={disabled}
-        />
-      </div>
-    </div>
-  );
+  return {
+    displayProvider,
+    taskUsage,
+    codingPlanUsageRemaining,
+    startPlanBalance: contextStartPlanBalance,
+  };
 }
-
-export const V4ComposerUsageRow = memo(V4ComposerUsageRowImpl);

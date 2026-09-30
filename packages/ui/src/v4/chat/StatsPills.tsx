@@ -103,7 +103,7 @@ function TimePill({ stats, open, onOpenChange }: {
     return (
       <span className={PILL_SPAN_CLASS}>
         {icon}
-        <span className="tabular-nums">{counts}</span>
+        <span className="min-w-0 truncate tabular-nums">{counts}</span>
       </span>
     );
   }
@@ -114,7 +114,7 @@ function TimePill({ stats, open, onOpenChange }: {
         aria-label={speedText === null ? counts : `${counts} · ${speedText}`}
       >
         {icon}
-        <span className="tabular-nums">
+        <span className="min-w-0 truncate tabular-nums">
           {counts}
           {speedText !== null ? (
             <>
@@ -187,7 +187,7 @@ function UsagePill({ cumulative, open, onOpenChange }: {
         aria-label={cacheHitText === null ? totalText : `${totalText} · ${cacheHitText}`}
       >
         <Database />
-        <span className="tabular-nums">
+        <span className="min-w-0 truncate tabular-nums">
           {totalText}
           {cacheHitText !== null ? (
             <>

@@ -157,7 +157,6 @@ import type { CodeViewerSource } from "@/lib/codeViewer.js";
 import { useConversationSelectionReferences } from "@/v4/composer/useConversationSelectionReferences.js";
 import { ConversationBackgroundWorkTrigger } from "@/v4/composer/ConversationBackgroundWorkTrigger.js";
 import { V4ComposerCuaEntry } from "@/v4/composer/V4ComposerCuaEntry.js";
-import { V4ComposerUsageRow } from "@/v4/composer/V4ComposerUsageRow.js";
 import { ZERO_SESSION_STATS } from "@/v4/chat/sessionStatsFormat.js";
 import {
   V4ComposerModeSwitch,
@@ -2097,6 +2096,8 @@ function ConversationComposerImpl({
             onSelectModel={handleSelectModelTrace}
             onSelectThought={onSelectThought}
             onSwitchMode={onSwitchMode}
+            onSendCompressionCommand={onSendCompressionCommand}
+            stats={snapshot?.stats ?? ZERO_SESSION_STATS}
             onRecoverCustomModelSelection={onRecoverCustomModelSelection}
           />
         </span>
@@ -2337,16 +2338,6 @@ function ConversationComposerImpl({
           </p>
         ) : null}
       </div>
-      {/* 计量行：DSH StatsPills 移植件 + 从工具条下移的上下文窗口计量。
-          挂在输入 surface 之外，不随输入卡圆角/边框分组；无数据时 StatsPills 自行不渲染。 */}
-      <V4ComposerUsageRow
-        provider={provider}
-        draftConfig={draftConfig}
-        usage={composerUsage}
-        stats={snapshot?.stats ?? ZERO_SESSION_STATS}
-        disabled={disabled}
-        onSendCompressionCommand={onSendCompressionCommand}
-      />
       <ImagePreviewDialog
         initialIndex={attachmentPreviewIndex}
         items={composerMediaPreviewItems}

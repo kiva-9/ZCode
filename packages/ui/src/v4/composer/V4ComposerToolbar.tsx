@@ -13,7 +13,8 @@
  *
  * 新任务和已有会话采用相同的 Composer 显示事实；prewarm 不补模型或档位。
  * 提交时由宿主（SessionPane）把冻结选择随 Submission 一起发送。
- * 上下文窗口计量与 DSH StatsPills 计量行已下移至输入框下方（V4ComposerUsageRow）。
+ * 计量区：DSH StatsPills 移植件 + 原位的上下文窗口圆形计量器（ChatContextUsage）——
+ * pills 在圆形计量器左侧；新会话无统计数据时 pills 不渲染，计量器位置与搬迁前一致。
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -26,10 +27,12 @@ import {
 import type {
   SessionConfigState,
   SessionPhase,
+  SessionStatsState,
   SessionUsageState,
 } from "@zcode/shared/zcode-protocol-v4";
 import { ModelConfigSelect, type ModelSelectGroup } from "@/ModelConfigSelect.js";
 import { Button } from "@/components/ui/button.js";
+import { ChatContextUsage } from "@/chat-input-toolbar/display.js";
 import { ThoughtLevelCycleControl } from "@/chat-input-toolbar/ThoughtLevelCycleControl.js";
 import { getNextThoughtLevelValue } from "@/chat-input-toolbar/thoughtLevelOptions.js";
 import type { V4ComposerConfigPicker } from "@/v4/composer/configPickerState.js";
@@ -54,6 +57,9 @@ import {
   resolveDraftModelThoughtOption,
   resolveDraftThoughtCurrentValue,
 } from "@/v4/composer/draftWorkspaceDefaults.js";
+import { useChatContextUsagePanel } from "./useChatContextUsagePanel.js";
+import { StatsPills } from "../chat/StatsPills.js";
+import { ZERO_CUMULATIVE, ZERO_SESSION_STATS } from "../chat/sessionStatsFormat.js";
 
 // 拆分件再导出（模式选择移居 V4ComposerModeControls，超行数拆分）：
 // 既有消费方（ConversationComposer）继续从本模块入口 import，接口面不变。
@@ -101,6 +107,10 @@ export interface V4ComposerToolbarProps {
   /** 选中思考深度；modelContext 固定本次用户操作的目标模型。 */
   onSelectThought: (thought: string, modelContext: { provider: string; model: string }) => void;
   onSwitchMode: (mode: string) => void;
+  /** context usage 面板的 /compact 入口（宿主走 v4 compact 命令）。 */
+  onSendCompressionCommand?: (command: string) => void;
+  /** 会话计量（snapshot.stats）；新会话/旧快照缺省时传 null， pills 不渲染。 */
+  stats: SessionStatsState | null;
   /** prepare/configOptions 失败时，custom provider 选择走 workspace recovery 链。 */
   onRecoverCustomModelSelection?: (
     value: string,
@@ -124,9 +134,11 @@ function V4ComposerModelControlsImpl({
   onConfigPickerOpenChange,
   onSelectModel,
   onSelectThought,
+  onSendCompressionCommand,
+  stats,
   onRecoverCustomModelSelection,
 }: V4ComposerToolbarProps) {
-  const { intl } = useZCodeIntl();
+  const { intl, locale } = useZCodeIntl();
   const displayProvider = provider ?? ZCODE_AGENT_PROVIDER;
   // 「管理模型」入口：设置页定位模型供应商区（模型配置件自身关注点，留在工具条）。
   const openSettingsTab = useTabStore((state) => state.openSettingsTab);
@@ -173,6 +185,10 @@ function V4ComposerModelControlsImpl({
   const effectiveConfig = useMemo<SessionConfigState | null>(() => {
     return resolveDraftDisplayedConfig(draftConfig ?? {});
   }, [draftConfig]);
+
+  // 上下文窗口圆形计量器（ChatContextUsage）配置：与 StatsPills 同行并列渲染在其右侧。
+  // 计算路径唯一（useChatContextUsagePanel），草稿态与会话态共用。
+  const contextUsagePanel = useChatContextUsagePanel({ provider, draftConfig, usage });
 
   // 高频交互排障只走 debug，避免生产日志量随每次选择增长。
   useEffect(() => {
@@ -456,7 +472,24 @@ function V4ComposerModelControlsImpl({
         data-usage-max={usage?.contextWindow?.maxTokens ?? ""}
         className="hidden"
       />
-      {/* 上下文窗口计量已下移至 composer 输入框下方（V4ComposerUsageRow，DSH StatsPills 同文档）。 */}
+      {/* 计量区：DSH StatsPills 移植件（两个 pill）在左，原位的上下文窗口圆形计量器在右。
+          新会话/无 token 活动时 StatsPills 整体不渲染，圆形计量器位置与搬迁前完全一致。 */}
+      <span className="flex min-w-0 shrink items-center" data-testid="v4-composer-stats-slot">
+        <StatsPills
+          stats={stats ?? ZERO_SESSION_STATS}
+          cumulative={usage?.cumulative ?? ZERO_CUMULATIVE}
+        />
+      </span>
+      <ChatContextUsage
+        codingPlanUsageRemaining={contextUsagePanel.codingPlanUsageRemaining}
+        taskUsage={contextUsagePanel.taskUsage}
+        startPlanBalance={contextUsagePanel.startPlanBalance}
+        selectedProvider={contextUsagePanel.displayProvider}
+        intl={intl}
+        locale={locale}
+        onSendCompressionCommand={onSendCompressionCommand}
+        compressionDisabled={disabled || recoveryPending}
+      />
       {modelSelectionState.status === "error" && modelSelectionReload ? (
         <Button
           type="button"
