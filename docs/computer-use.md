@@ -162,9 +162,11 @@ and the background-refusal path.
 
 Not verified — treat each as unproven rather than working:
 
-- Screenshot delivery through the model message in the session it was tested in
-  (that session later stopped exposing any AXWindow elements — `ax_window_unresolved`
-  for every window).
+- ~~Screenshot delivery through the model message~~ — **verified after unlocking the
+  screen**: a live on-screen window with 326 AX elements returned a real raster
+  (149 KiB, inside the 200 KiB inline budget) that the host's
+  `normalizeMcpToolResultForModel` kept byte-exact, `image` block first, with the
+  `image_ref` bound to the same observation's `state_id`.
 - Windows and Linux.
 - The packaged installer.
 - The desktop task set (an end-to-end task suite over the desktop).
