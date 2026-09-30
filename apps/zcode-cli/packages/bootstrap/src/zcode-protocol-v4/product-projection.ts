@@ -96,6 +96,7 @@ import type {
   ReasoningRow,
   RunningSubagentSummary,
   SessionControl,
+  SessionStatsState,
   SessionUsageState,
   StatePatch,
   SubagentProjectionState,
@@ -253,6 +254,12 @@ export interface SessionUsageSeed {
     maxTokens: number | null;
   };
   cumulative?: Partial<SessionUsageState["cumulative"]>;
+  /**
+   * 计量折叠的冷恢复种子。只播可从持久 transcript 还原的 token 字段
+   * （decodeTokens ← assistant 消息 output 合计）；turns/steps 由 hydration
+   * 事件重放重建，llmMs/ttftMs/decodeMs 等原始流计时不在持久事实里，留 0。
+   */
+  stats?: Partial<SessionStatsState>;
 }
 
 interface ContextWindowProjectionState {
@@ -678,6 +685,11 @@ export class ProductProjection {
       cacheReadTokens: seed.cumulative?.cacheReadTokens ?? current.cumulative.cacheReadTokens,
       cacheWriteTokens: seed.cumulative?.cacheWriteTokens ?? current.cumulative.cacheWriteTokens,
     };
+    // stats 种子只带 decodeTokens（transcript 可还原的 output 合计）；turns/steps 由
+    // hydration 事件重放重建，llm/ttft/decode 计时不在持久事实里，保持重放值。
+    const stats = seed.stats
+      ? { ...this.snapshot.stats, ...seed.stats }
+      : this.snapshot.stats;
     if (this.contextWindowState.touchedByEvent) {
       // 同类守卫：显式 ModelSelected.contextWindow（含 null）是日志权威容量，
       // hydration seed 只能补回更准确的 token 事实，不得覆盖 maxTokens 或重新显示 null。
@@ -693,6 +705,7 @@ export class ProductProjection {
             : null,
           cumulative,
         },
+        stats,
       };
       return;
     }
@@ -715,6 +728,7 @@ export class ProductProjection {
             : { ...seededContextWindow, maxTokens: seededContextWindow.maxTokens },
         cumulative,
       },
+      stats,
     };
   }
 
