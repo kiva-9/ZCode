@@ -31,4 +31,6 @@ export declare function createNodeReplMcpRuntime(input?: {
 export { installNodeReplProcessGuards, installNodeReplShutdownTriggers };
 export declare function main(): Promise<void>;
 export declare function captureComputerUseRuntimeFromEnvironment(env?: NodeJS.ProcessEnv): ComputerUseRuntime | undefined;
+/** Computer Use 在本宿主是否可用（用于 tools/list 与 server instructions）。 */
+export declare function isComputerUseRuntimeAvailable(env?: NodeJS.ProcessEnv): boolean;
 //# sourceMappingURL=server.d.ts.map

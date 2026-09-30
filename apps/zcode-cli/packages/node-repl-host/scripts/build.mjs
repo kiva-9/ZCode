@@ -35,8 +35,7 @@ const require = __zcodeCreateRequire(import.meta.url);`;
 //
 // 取值与 desktop 侧保持同一来源：CI 注入 ZCODE_CUA_HELPER_BUILD_ID env；dev 为空串走兜底
 // （dev Helper 不走下载/pin 校验）。见 packages/desktop/tsup.config.ts 同名 define 的注释。
-const resolveCuaHelperBuildId = (env = process.env) =>
-  env.ZCODE_CUA_HELPER_BUILD_ID?.trim() ?? "";
+const resolveCuaHelperBuildId = (env = process.env) => env.ZCODE_CUA_HELPER_BUILD_ID?.trim() ?? "";
 
 export const buildNodeReplHostBundle = async ({
   outfile = resolve(packageRoot, "dist", "mcp", "server.js"),
@@ -46,6 +45,20 @@ export const buildNodeReplHostBundle = async ({
   await build({
     banner: { js: nodeRequireBanner },
     bundle: true,
+    // Computer Use 的驱动必须保持**运行时 import**，不能被 esbuild 内联。
+    //
+    // 原因（实测 2026-09-30）：不声明 external 时，esbuild 会把
+    // `@trycua/cua-driver/dist/native/node-runtime.js`（连同 @ubjs/* 的平台解析逻辑）
+    // 整个打进本 bundle。那份代码靠**自己包内相对路径**定位
+    // `libcua_driver_sdk.dylib` / `cua_driver_node_runtime.node`；进了我们的 bundle 之后
+    // import.meta.url 指向 dist/mcp/server.js，原生库解析必然失败 —— 而症状要到安装包
+    // 第一次 Computer Use 调用才出现（源码/dev 下 node_modules 在祖先链上，恰好能解析，
+    // 所以本地怎么测都看不出来）。
+    //
+    // 这与 packages/desktop/scripts/cua-driver-package-assets.mjs 的两道约束是同一件事：
+    // 驱动树被 stage 到 <agent bundle>/glm/packages/node-repl-host/node_modules/，
+    // 正等着 bundle 在运行时按祖先链解析它。
+    external: ["@trycua/cua-driver", "@ubjs/core", "@ubjs/node"],
     define: {
       __ZCODE_CUA_HELPER_BUILD_ID__: JSON.stringify(cuaHelperBuildId),
     },
@@ -64,6 +77,19 @@ export const buildNodeReplHostBundle = async ({
       throw new Error(
         `[node-repl-host] ZCODE_CUA_HELPER_BUILD_ID=${cuaHelperBuildId} 未折叠进 ${outfile}：` +
           "__ZCODE_CUA_HELPER_BUILD_ID__ define 没有生效，正式包的 Helper 安装会被 fail-closed 拒绝。",
+      );
+    }
+  }
+  // Computer Use 驱动仍须是运行时 import：被内联就等于安装包里没有可解析的原生库，
+  // 而那只在用户第一次调用时暴露（构建全程绿灯）。
+  {
+    const bundled = await readFile(outfile, "utf8");
+    const specifier = "@trycua/cua-driver";
+    if (!bundled.includes(specifier)) {
+      throw new Error(
+        `[node-repl-host] ${outfile} 里找不到运行时 import 的 "${specifier}"：` +
+          "Computer Use 驱动被 esbuild 内联了，安装包将无法解析平台原生二进制。" +
+          '请把 "@trycua/cua-driver"（及 @ubjs/*）加进 esbuild 的 external。',
       );
     }
   }

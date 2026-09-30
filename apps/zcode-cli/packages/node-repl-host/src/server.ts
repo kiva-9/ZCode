@@ -30,10 +30,12 @@ import {
 } from "./process-lifecycle.js";
 import { toMcpRunResult } from "./result.js";
 import {
+  buildNodeReplTools,
   JS_TOOL_DESCRIPTION,
   NODE_REPL_DEFAULT_TIMEOUT_MS,
   NODE_REPL_SERVER_INSTRUCTIONS,
   NODE_REPL_SERVER_VERSION,
+  withComputerUseAvailabilityNote,
 } from "./tool-contract.js";
 
 const MAX_SYNC_TIMEOUT_MS = 120_000;
@@ -72,15 +74,6 @@ const requestContextSchema = z
     delivery_kind: z.string().optional(),
   })
   .passthrough();
-
-const tools: Tool[] = [
-  {
-    name: "js",
-    description: JS_TOOL_DESCRIPTION,
-    // host MCP 曾手写出 title optional 的模型合同，和 built-in 合同分叉后 UI 只能显示固定完成文案。
-    inputSchema: JsInputJsonSchema as Tool["inputSchema"],
-  },
-];
 
 export interface NodeReplExecuteInput {
   code: string;
@@ -168,6 +161,7 @@ export function createNodeReplMcpRuntime(
   const executeJs = input.executeJs ?? executeJsInWorker;
   const cuaRuntime =
     input.cuaRuntime ?? captureComputerUseRuntimeFromEnvironment();
+  const computerUseEnabled = cuaRuntime !== undefined;
   const cuaBroker = cuaRuntime
     ? createNodeReplCuaBroker({ runtime: cuaRuntime, platform: process.platform })
     : undefined;
@@ -193,10 +187,17 @@ export function createNodeReplMcpRuntime(
 
   const server = new Server(
     { name: "node_repl", version: NODE_REPL_SERVER_VERSION },
-    { capabilities: { tools: {} }, instructions: NODE_REPL_SERVER_INSTRUCTIONS },
+    {
+      capabilities: { tools: {} },
+      instructions: withComputerUseAvailabilityNote(NODE_REPL_SERVER_INSTRUCTIONS, {
+        computerUseEnabled,
+      }),
+    },
   );
 
-  server.setRequestHandler("tools/list", async () => ({ tools }));
+  server.setRequestHandler("tools/list", async () => ({
+    tools: buildNodeReplTools({ computerUseEnabled }),
+  }));
   server.setRequestHandler("tools/call", async (request, extra) => {
     if (disposed) throw new Error("node_repl runtime is disposed");
     const name = request.params.name;
@@ -372,12 +373,45 @@ if (!isMainThread && isWorkerCallData(workerData)) {
 export function captureComputerUseRuntimeFromEnvironment(
   env: NodeJS.ProcessEnv = process.env,
 ): ComputerUseRuntime | undefined {
-  const socketPath = env.ZCODE_CUA_PERMISSION_BROKER_SOCKET?.trim();
-  if (!socketPath) return undefined;
+  // 门 1（宿主装配标识）：只有官方 plugin host 在注入 broker 凭据时才会带上
+  // `ZCODE_CUA_NODE_REPL_HOST=1`。普通 MCP 客户端、CI、REPL 测试都不设它 —— 于是
+  // 它们根本不会走到原生驱动加载这一步（PRD AC-01：未启用不加载驱动、不抓屏、不输入）。
+  if (env.ZCODE_CUA_NODE_REPL_HOST !== "1") return undefined;
+  // 门 2（驱动可解析）：createComputerUseRuntime 总是返回对象，驱动是懒加载的，
+  // 所以「符号缺失」不会让 cuaRuntime 变成 undefined。那样会静默 defeat 两个反自我安装
+  // 护栏：js 工具描述不会带不可用后缀，桥接也不会给出「没有东西需要安装」的提示，
+  // 模型只会看到一句点名包名的 "Cannot find package '@trycua/cua-driver'" ——
+  // 而那句文本会诱导模型自己去 npm install 一个猜出来的包。
+  // 检测必须是**只解析**：import.meta.resolve 不 import，ESM-only 的包用
+  // createRequire().resolve 会抛 ERR_PACKAGE_PATH_NOT_EXPORTED，把「包在」误判成「包不在」。
+  if (!isCuaDriverResolvable()) return undefined;
   return createComputerUseRuntime({
-    brokerSocketPath: socketPath,
-    refreshMarkerPath: env.ZCODE_CUA_PERMISSION_BROKER_REFRESH_MARKER?.trim(),
+    driver: "open-source",
+    ...(env.ZCODE_CUA_PERMISSION_BROKER_SOCKET?.trim()
+      ? { brokerSocketPath: env.ZCODE_CUA_PERMISSION_BROKER_SOCKET.trim() }
+      : {}),
+    ...(env.ZCODE_CUA_PERMISSION_BROKER_REFRESH_MARKER?.trim()
+      ? { refreshMarkerPath: env.ZCODE_CUA_PERMISSION_BROKER_REFRESH_MARKER.trim() }
+      : {}),
   });
+}
+
+/** Computer Use 在本宿主是否可用（用于 tools/list 与 server instructions）。 */
+export function isComputerUseRuntimeAvailable(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.ZCODE_CUA_NODE_REPL_HOST === "1" && isCuaDriverResolvable();
+}
+
+const CUA_DRIVER_PACKAGE_SPECIFIER = "@trycua/cua-driver";
+
+function isCuaDriverResolvable(): boolean {
+  try {
+    import.meta.resolve(CUA_DRIVER_PACKAGE_SPECIFIER);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isWorkerCallData(value: unknown): value is WorkerCallData {

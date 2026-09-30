@@ -1,3 +1,6 @@
+import type { Tool } from "@modelcontextprotocol/server";
+import { JsInputJsonSchema } from "@zcode/contracts/tools/node-repl";
+
 // 旧默认值与模型常用的 30 秒页面等待相同，发送等副作用成功后会在结果读取前被中止。
 // 执行层和模型可见文案共用该常量，避免真实超时与 tools/list 描述漂移。
 export const NODE_REPL_DEFAULT_TIMEOUT_MS = 60_000;
@@ -17,6 +20,48 @@ export const NODE_REPL_DEFAULT_TIMEOUT_MS = 60_000;
 // 而文档知道的路径宿主自己就能注入。两者实测调用量均为 0。宿主协议变了就得让 serverInfo 能被
 // 据此识别，否则宿主无法区分自己连上的是哪一代工具面。
 export const NODE_REPL_SERVER_VERSION = "0.6.0";
+
+/**
+ * Computer Use 可用/不可用两种形态下的补充说明。
+ *
+ * 为什么必须区分（真机教训）：驱动缺失时，如果工具描述对此**只字不提**，模型看到的
+ * 唯一线索是运行时那句点名包名的 "Cannot find package '@trycua/cua-driver'"。
+ * 那会诱导它去 npm install 一个自己猜出来的包。不可用时要把「没有东西需要安装」
+ * 写进描述里，让模型第一步就去告诉用户开启插件。
+ */
+export function withComputerUseAvailabilityNote(
+  instructions: string,
+  options: { computerUseEnabled: boolean },
+): string {
+  return options.computerUseEnabled
+    ? `${instructions} Computer Use is available in this session.`
+    : `${instructions} Computer Use is NOT available in this session, and there is nothing to install: ` +
+        "the Computer Use plugin ships disabled by default and the host did not provide its runtime. " +
+        "Tell the user to enable it in Settings → Computer Use; do not install, upgrade or guess any driver package.";
+}
+
+export function buildNodeReplTools(
+  options: { computerUseEnabled: boolean },
+): Tool[] {
+  const description = options.computerUseEnabled
+    ? JS_TOOL_DESCRIPTION
+    : `${JS_TOOL_DESCRIPTION} ${JS_TOOL_DESCRIPTION_COMPUTER_USE_DISABLED_SUFFIX}`;
+  return [
+    {
+      name: "js",
+      description,
+      // host MCP 曾手写出 title optional 的模型合同，和 built-in 合同分叉后 UI 只能显示固定完成文案。
+      inputSchema: JsInputJsonSchema as Tool["inputSchema"],
+    },
+  ];
+}
+
+/** 不可用时的后缀：明确「没有东西需要安装」，堵住自我安装这条路径。 */
+export const JS_TOOL_DESCRIPTION_COMPUTER_USE_DISABLED_SUFFIX =
+  "Computer Use is not available in this session and there is nothing to install: the Computer Use " +
+  "plugin is disabled by default and the host did not provide its runtime. Tell the user to enable it " +
+  "in Settings → Computer Use. Never install, upgrade, or guess a driver package.";
+
 
 // node_repl 的底层能力是通用 JS，旧文案却没有声明模型路由边界，导致非浏览器任务
 // 也会误选这个高权限工具。Browser Use 与 Computer Use 是合法入口，因此 server 与 tool 文案都要显式限域。

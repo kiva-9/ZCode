@@ -147,6 +147,13 @@ export const OFFICIAL_PLUGIN_DEFINITIONS: readonly OfficialPluginDefinition[] = 
       "../../node-repl-host",
       "../../../node-repl-host",
     ],
+    // Computer Use 的原生驱动（@trycua/cua-driver + 平台二进制）由
+    // packages/desktop/scripts/cua-driver-package-assets.mjs stage 到
+    // <agent bundle>/glm/packages/node-repl-host/node_modules/，seed 白名单是
+    // **深度 0 才放过**的：不在这里声明 node_modules，整个驱动树会被静默裁掉，
+    // 安装包首启第一次调用才 ERR_MODULE_NOT_FOUND（构建全程绿灯）。
+    // 只有 node-repl-host 需要它；浏览器插件的 85MiB 构建期依赖不能再被带进用户 cache。
+    runtimeTopLevelPaths: ["node_modules"],
     version: "0.6.0",
   },
   {

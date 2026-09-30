@@ -445,6 +445,10 @@ import {
 } from "./runtime-tools/agentProxyEnv.js";
 import { ensureAppCaCert } from "./runtime-tools/appCaCert.js";
 import { buildHelperOpenArgs, isCuaLocalDevelopmentRuntime } from "@zcode/zcode-cua/broker/server";
+import {
+  canRunOpenSourceCuaDriver,
+  resolveCuaProductHelperSpawnEnv,
+} from "./cua-permission-broker/cuaProductHelperSpawnEnv.js";
 import { createServiceLogger, type ServiceLogger } from "#src/logger/serviceLogger.js";
 import { IOffPeakTaskService } from "./session/offPeakTask.js";
 import { OffPeakTaskService } from "./session/offPeakTaskService.js";
@@ -2230,7 +2234,7 @@ export function createLocalServices(options: {
       // 供后续配置/生命周期 bookkeeping 使用；recovery 只清理 marker，不回收已有 Agent。
       cuaProductHelperWorkspaceRegistry.setEnabled(context, Boolean(cuaProductHelperHost));
       let cuaProductHelperEnv: Record<string, string> = {};
-      if (!helper && cuaPluginEnabled && process.platform === "darwin") {
+      if (!helper && cuaPluginEnabled && canRunOpenSourceCuaDriver(process.platform)) {
         // 懒启动：无托管 host 时注入稳定 socket；无 token（身份模式）、无 pluginAuthority
         // （其校验方就是 host，host 缺席时无意义）。SDK ensureBrokerAvailable 负责拉起。
         // pluginAuthority 是 agent 进程内的 config-provenance 随机数（bootstrap 捕获后写进
@@ -2249,7 +2253,11 @@ export function createLocalServices(options: {
         // host.start/checkHealth 也会 await；dispose 可能在这段等待中同步落 terminal fence。
         // 返回 spawn env 前二次核对代际，失效时显式标成 unavailable，绝不把已回收 tuple 交给晚到 Agent。
         if (isDefaultCuaProductHelperCurrent(helper)) {
-          cuaProductHelperEnv = candidateEnv;
+          // Helper 起不来（本构建不随包携带 cua-helper）时，在开源驱动支持的平台上
+          // 退回懒铸造契约；三平台之外保持 fail-closed，不伪造凭据。
+          cuaProductHelperEnv = resolveCuaProductHelperSpawnEnv(candidateEnv, {
+            platform: process.platform,
+          });
         } else {
           cuaProductHelperWorkspaceRegistry.setEnabled(context, false);
           cuaProductHelperEnv = {
