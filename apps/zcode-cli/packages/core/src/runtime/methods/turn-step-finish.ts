@@ -13,6 +13,8 @@ export async function persistToolModelStepFinish(
     assistantMessageId: MessageId;
     modelTraceContext: TraceContext;
     result: RuntimeModelTextResult;
+    /** 本轮首个输出增量时间；持久化供冷恢复还原 ttft/decode 计时。 */
+    firstTokenAt?: number;
   },
 ): Promise<void> {
   const model = state.model;
@@ -39,6 +41,7 @@ export async function persistToolModelStepFinish(
       completed: Date.now(),
       finish: options.result.finishReason,
       tokens: toTokenUsageInfo(options.result.usage),
+      ...(options.firstTokenAt !== undefined ? { firstTokenAt: options.firstTokenAt } : {}),
     },
     options.modelTraceContext,
     model,

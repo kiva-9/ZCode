@@ -389,6 +389,11 @@ export interface AssistantMessageInfo {
   time: {
     created: number;
     completed?: number;
+    /**
+     * 本轮首个输出增量（文本/推理）的本地时间；冷恢复计算 ttft/decode 计时的
+     * 持久事实源（DSH sessionStats 移植，见 StatsPills spec）。旧消息缺省。
+     */
+    firstTokenAt?: number;
   };
   error?: AssistantErrorInfo;
   parentID: MessageId;

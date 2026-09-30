@@ -278,6 +278,8 @@ export async function persistAssistantMessage(
         error?: { name: string; data?: Record<string, unknown> };
         finish?: string;
         tokens?: ReturnType<typeof toTokenUsageInfo>;
+        /** 本轮首个输出增量时间；冷恢复还原 ttft/decode 计时的持久事实。 */
+        firstTokenAt?: number;
       }
     | undefined,
   traceContext: TraceContext,
@@ -301,6 +303,7 @@ export async function persistAssistantMessage(
       role: "assistant",
       time: {
         created,
+        ...(update?.firstTokenAt !== undefined ? { firstTokenAt: update.firstTokenAt } : {}),
         completed: update?.completed,
       },
       error: update?.error,

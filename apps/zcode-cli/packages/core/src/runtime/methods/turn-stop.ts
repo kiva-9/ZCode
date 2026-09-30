@@ -38,6 +38,8 @@ export async function persistCompletedAssistantStep(
     includeEmptyAssistant: boolean;
     modelTraceContext: TraceContext;
     result: RuntimeModelTextResult;
+    /** 本轮首个输出增量时间；持久化供冷恢复还原 ttft/decode 计时。 */
+    firstTokenAt?: number;
   },
 ): Promise<boolean> {
   const model = state.model;
@@ -96,6 +98,7 @@ export async function persistCompletedAssistantStep(
       completed: Date.now(),
       finish: options.result.finishReason,
       tokens: persistedTokens,
+      ...(options.firstTokenAt !== undefined ? { firstTokenAt: options.firstTokenAt } : {}),
     },
     options.modelTraceContext,
     model,

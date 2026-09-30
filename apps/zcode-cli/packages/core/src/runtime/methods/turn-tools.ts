@@ -50,6 +50,8 @@ export async function executeToolCallsForModelStep(
     result: RuntimeModelTextResult;
     streamedToolResults?: StreamedToolExecutionResult[];
     toolCalls: ModelToolCall[];
+    /** 本轮首个输出增量时间；随 step-finish 持久化供冷恢复还原 ttft/decode 计时。 */
+    firstTokenAt?: number;
   },
 ): Promise<"continue" | "break"> {
   const model = state.model;

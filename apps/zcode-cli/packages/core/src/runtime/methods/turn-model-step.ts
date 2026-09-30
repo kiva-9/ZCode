@@ -213,6 +213,14 @@ async function runModelBackedTurnStepImpl(
   });
   const networkEventStartIndex = state.events.length;
   let latestStreamSnapshot: RuntimeModelStreamSnapshot = { reasoning: [], text: "" };
+  // 首 token 时间：流式输出的第一个非空增量（DSH firstTokenTime 语义）。
+  // 持久化进 assistant 消息 time.firstTokenAt，冷恢复据此还原 ttft/decode 计时。
+  let firstStreamTokenAt: number | undefined;
+  const recordFirstStreamToken = (): void => {
+    if (firstStreamTokenAt === undefined) {
+      firstStreamTokenAt = Date.now();
+    }
+  };
   const streamRecoveryRequest = state.pendingStreamRecoveryRequest;
   state.pendingStreamRecoveryRequest = undefined;
   let latestModelRequestId: string | undefined;
@@ -253,8 +261,14 @@ async function runModelBackedTurnStepImpl(
         latestStreamSnapshot = snapshot;
       },
       onModelNetworkStatus: recordModelNetworkStatus,
-      onStreamReasoningDelta: (text) => streamingToolCoordinator.recordReasoningDelta(text),
-      onStreamTextDelta: (text) => streamingToolCoordinator.recordTextDelta(text),
+      onStreamReasoningDelta: (text) => {
+        recordFirstStreamToken();
+        streamingToolCoordinator.recordReasoningDelta(text);
+      },
+      onStreamTextDelta: (text) => {
+        recordFirstStreamToken();
+        streamingToolCoordinator.recordTextDelta(text);
+      },
       onStreamToolCall: (toolCall) => streamingToolCoordinator.accept(toolCall),
       streamRecovery: streamRecoveryRequest,
       tools: options.tools,
@@ -655,6 +669,7 @@ async function runModelBackedTurnStepImpl(
       includeEmptyAssistant: false,
       modelTraceContext,
       result,
+      firstTokenAt: firstStreamTokenAt,
     });
     if (assistantCommitted) recordModelHistoryRound(state);
     if (outputTokenContinuation === "continue") {
@@ -728,6 +743,7 @@ async function runModelBackedTurnStepImpl(
     result,
     toolCalls: executableToolCalls,
     streamedToolResults,
+    firstTokenAt: firstStreamTokenAt,
   });
   return toolStepResult;
 }
