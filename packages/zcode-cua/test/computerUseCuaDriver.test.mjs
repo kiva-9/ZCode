@@ -38,6 +38,21 @@ test("list_apps only surfaces user-addressable apps", async () => {
   );
 });
 
+test("list_apps 的应用关联写进 _meta（宿主据此显示应用名/图标）", async () => {
+  // 回归：okResult 曾只转发 content/structuredContent，list_apps 与 request_access 的
+  // _meta 被静默丢掉 —— 工具卡不显示目标应用、设置页权限行永不更新，且无任何报错。
+  await withRuntime(baseScript(), async ({ runtime }) => {
+    const result = await execute(runtime, "list_apps", {});
+    const items = result._meta?.["zcode.cua/app-associations-v1"]?.items;
+    assert.ok(Array.isArray(items), JSON.stringify(result._meta));
+    assert.deepEqual(
+      items.map((item) => item.appKey),
+      ["bundle:org.kde.dolphin"],
+    );
+    assert.equal(items[0].displayName, "Dolphin");
+  });
+});
+
 test("get_app_state resolves the app to a pid and returns a usable state_id", async () => {
   await withRuntime(baseScript(), async ({ runtime, driver }) => {
     const result = await execute(runtime, "get_app_state", APP);
@@ -218,6 +233,23 @@ test("动作参数白名单：客户端多传的 strategy / hold_seconds 不会�
   );
 });
 
+test("mouse_move 只投递坐标，不要求元素观察", async () => {
+  await withRuntime(
+    baseScript({ move_cursor: envelope({ delivery: { mode: "background", delivered_count: 1 } }) }),
+    async ({ runtime, driver }) => {
+      const result = await execute(runtime, "mouse_move", { ...APP, x: 120, y: 240 });
+      assert.equal(result.isError, undefined, JSON.stringify(result.content));
+      const move = driver.calls.find((call) => call.name === "move_cursor");
+      assert.equal(move.args.x, 120);
+      assert.equal(move.args.y, 240);
+      // 非负整数守卫：负坐标必须在驱动调用前被拒。
+      const bad = await execute(runtime, "mouse_move", { ...APP, x: -1, y: 3 });
+      assert.equal(bodyOf(bad).code, "invalid_request");
+      assert.equal(driver.calls.filter((call) => call.name === "move_cursor").length, 1);
+    },
+  );
+});
+
 test("an unlaunched app is launched once through its bundle id", async () => {
   // 与 CE 断言的差异：0.28.2 的 launch_app schema 只有 bundle_id / name，
   // 没有 launch_path —— CE 传 launch_path 会被拒（见 docs/development/computer-use.md）。
@@ -263,4 +295,59 @@ test("an unknown app reports the retryable not-running message", async () => {
     // 客户端按这个前缀决定「换字段再查一次」，改文案会静默废掉那条备用查询。
     assert.match(body.message, /target app is not running/u);
   });
+});
+
+// ─────────────────────────────────────────── 方法全覆盖守卫
+
+test("每个已实现 method 都能跑通（不存在漏 import 的运行时 ReferenceError）", async () => {
+  // 背景：抽出 diagnostics 模块时漏了 readPermissionReport /
+  // CUA_REQUEST_ACCESS_STATUS_META_KEY 两个 import，request_access 一调用就
+  // INTERNAL: xxx is not defined。单测只覆盖被测方法，所以漏了一个月没人发现。
+  // 这个守卫遍历运行时声明的全部 method，任何「用到未导入符号」都会在这里现形。
+  const { CUA_METHOD_NAMES } = await import("../index.js");
+  const readOnly = new Set([
+    "list_apps",
+    "list_windows",
+    "request_access",
+    "get_capabilities",
+    "get_diagnostics",
+    "stop_computer_control",
+  ]);
+  const withTarget = {
+    left_click: { target: { type: "element", index: 1 } },
+    left_click_drag: {
+      from_target: { type: "element", index: 0 },
+      to: { type: "coordinate", x: 1, y: 2 },
+    },
+    scroll: { target: { type: "element", index: 0 }, scroll_direction: "down" },
+    mouse_move: { x: 1, y: 2 },
+    type: { text: "x" },
+    set_value: { value: "x" },
+    key: { text: "ctrl+a" },
+  };
+  for (const method of CUA_METHOD_NAMES) {
+    if (!readOnly.has(method) && !(method in withTarget)) continue; // 未实现的那三个
+    const args = readOnly.has(method) ? {} : { ...APP, ...withTarget[method] };
+    if (method === "get_app_state") continue; // 需要先观察，另有专门用例
+    if (method === "stop_computer_control") continue; // 会触发 kill switch，另有专门用例
+    const script = baseScript({
+      click: envelope({ delivery: { mode: "background", delivered_count: 1 } }),
+      drag: envelope({ delivery: { mode: "background", delivered_count: 1 } }),
+      type_text: envelope({ delivery: { mode: "background", delivered_count: 1 } }),
+      set_value: envelope({ delivery: { mode: "background", delivered_count: 1 } }),
+      press_key: envelope({ delivery: { mode: "background", delivered_count: 1 } }),
+      scroll: envelope({ delivery: { mode: "background", delivered_count: 1 } }),
+      move_cursor: envelope({ delivery: { mode: "background", delivered_count: 1 } }),
+    });
+    await withRuntime(script, async ({ runtime }) => {
+      const result = await execute(runtime, method, args);
+      const body = result.isError ? bodyOf(result) : null;
+      assert.equal(
+        body?.code === "internal" && /is not defined/.test(String(body?.message ?? "")),
+        false,
+        `${method} 触发未定义引用：${body?.message ?? ""}`,
+      );
+      assert.notEqual(body?.code, "unimplemented", `${method} 应已实现`);
+    });
+  }
 });

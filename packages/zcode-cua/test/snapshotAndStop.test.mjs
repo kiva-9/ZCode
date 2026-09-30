@@ -341,6 +341,64 @@ test("get_capabilities 报告平台/驱动/权限/会话四类事实", async () 
   });
 });
 
+// ─────────────────────────────────────────── request_access（曾被漏测的回归）
+
+test("request_access 回报真实 TCC 状态（granted/denied）", async () => {
+  // 回归：抽出 diagnostics 模块时漏了 readPermissionReport 的 import，request_access
+  // 一调用就 INTERNAL: readPermissionReport is not defined。这个用例钉住它。
+  await withRuntime(
+    baseScript({
+      check_permissions: envelope({
+        accessibility: true,
+        screen_recording: false,
+        source: {
+          executable: "/tmp/zcode.app/Contents/MacOS/ZCode",
+          host_bundle_id: "dev.zcode.app",
+        },
+      }),
+    }),
+    async ({ runtime }) => {
+      const result = await execute(runtime, "request_access", {});
+      assert.equal(result.isError, undefined, JSON.stringify(result.content));
+      assert.equal(result.structuredContent.accessibility, "granted");
+      assert.equal(result.structuredContent.screenRecording, "denied");
+      assert.equal(result.structuredContent.ready, false);
+      assert.equal(
+        result.structuredContent.permission_subject,
+        "/tmp/zcode.app/Contents/MacOS/ZCode (dev.zcode.app)",
+      );
+    },
+  );
+});
+
+test("request_access 在 darwin 上同时写 _meta 信封（设置页权限行读它）", async () => {
+  await withRuntime(
+    baseScript({
+      check_permissions: envelope({
+        accessibility: true,
+        screen_recording: true,
+        source: {
+          executable: "/tmp/zcode.app/Contents/MacOS/ZCode",
+          host_bundle_id: "dev.zcode.app",
+        },
+      }),
+    }),
+    async ({ runtime }) => {
+      const result = await execute(runtime, "request_access", {});
+      const meta = result._meta?.["zcode.cua/request-access-status-v1"];
+      // 字段必须与 packages/shared 的 cuaRequestAccessStatusSchema 逐字一致。
+      assert.deepEqual(meta, {
+        schemaVersion: 1,
+        platform: "darwin",
+        grantOwner: "/tmp/zcode.app/Contents/MacOS/ZCode (dev.zcode.app)",
+        accessibility: "granted",
+        screenRecording: "granted",
+      });
+      assert.equal(result.structuredContent.ready, true);
+    },
+  );
+});
+
 test("get_diagnostics 只读：不产生任何点击或输入", async () => {
   await withRuntime(baseScript(), async ({ runtime, driver }) => {
     await execute(runtime, "get_app_state", APP);

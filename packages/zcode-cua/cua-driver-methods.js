@@ -30,12 +30,14 @@ import { CUA_ACTIONS } from "./cua-driver-actions.js";
 import { observationKeyOf, resolveTarget, usableWindows } from "./cua-driver-targets.js";
 import { appIdentityOf } from "./cua-driver-apps.js";
 import { CUA_APP_ASSOCIATIONS_META_KEY } from "./host-display-contract.js";
+import { CUA_REQUEST_ACCESS_STATUS_META_KEY } from "./request-access-contract.js";
 import {
   CUA_METHOD_CLASS,
   classifyCuaMethod,
   requiresActionApproval,
 } from "./cua-capability-policy.js";
 import { createCuaDiagnostics } from "./cua-driver-diagnostics.js";
+import { readPermissionReport } from "./cua-driver-capabilities.js";
 import { createCuaAppResolver } from "./cua-driver-apps.js";
 /** 帧对必须排在 content 最前（core 投影器对非规范布局直接抛错）。 */
 function normalizeFrameFirst(result) {

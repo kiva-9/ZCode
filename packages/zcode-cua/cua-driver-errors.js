@@ -147,11 +147,19 @@ export function jsonSafe(value, depth = 0) {
   }
   return value;
 }
-/** 成功信封。content 为 [] 时也要保留 structuredContent，宿主展示面板需要它。 */
-export function okResult({ content = [], structuredContent } = {}) {
+/**
+ * 成功信封。content 为 [] 时也要保留 structuredContent，宿主展示面板需要它。
+ *
+ * `_meta` 必须原样透出：request_access 的权限状态信封、list_apps 的应用关联
+ * （宿主据此在卡片上显示应用名/图标）都走这个字段。早前这里只转发 content 与
+ * structuredContent，两个 _meta 都被静默丢掉 —— 表现是设置页权限行永远不更新、
+ * 工具卡不显示目标应用，且没有任何报错。
+ */
+export function okResult({ content = [], structuredContent, _meta } = {}) {
   return {
     content,
     ...(structuredContent ? { structuredContent: jsonSafe(structuredContent) } : {}),
+    ...(_meta ? { _meta: jsonSafe(_meta) } : {}),
   };
 }
 /**
